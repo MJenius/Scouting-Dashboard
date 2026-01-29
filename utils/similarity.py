@@ -273,7 +273,7 @@ class SimilarityEngine:
         )
     """
     
-    FUZZY_MATCH_THRESHOLD = 80  # Minimum match score for fuzzy fallback
+    FUZZY_MATCH_THRESHOLD = 85  # Minimum match score for fuzzy fallback (increased for better accuracy)
     
     def __init__(
         self,

@@ -58,11 +58,13 @@ class LLMScoutNarrativeGenerator:
                 print(f"✓ API key found (starts with: {api_key[:10]}...)")
                 try:
                     genai.configure(api_key=api_key)
-                    # Use Gemini 2.0 Flash (current model as of 2026)
-                    self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
-                    print("✓ Gemini API initialized successfully with gemini-2.0-flash-exp")
+                    # Use Gemini 2.5 Flash (latest stable model)
+                    # Note: Must use full path 'models/gemini-2.5-flash'
+                    self.model = genai.GenerativeModel('models/gemini-2.5-flash')
+                    print("✓ Gemini API initialized successfully with gemini-2.5-flash")
                 except Exception as e:
                     print(f"⚠ Gemini API initialization failed: {e}")
+                    print("⚠ Falling back to rule-based narrative generation")
                     self.use_llm = False
             else:
                 print("⚠ No Gemini API key found in environment or parameters.")

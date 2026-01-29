@@ -16,7 +16,8 @@ matplotlib>=3.7.0
 rapidfuzz>=3.0.0
 
 # PDF Generation
-fpdf>=1.7.2
+fpdf2>=2.7.0
+pillow>=10.0.0
 
 # Configuration
 pyyaml>=6.0

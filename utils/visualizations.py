@@ -460,6 +460,7 @@ class PlotlyVisualizations:
         df: pd.DataFrame,
         height: int = 700,
         width: int = 1000,
+        highlight_player: Optional[str] = None,
     ) -> go.Figure:
         """
         Create interactive 2D scatter plot of players by PCA coordinates colored by archetype.
@@ -471,6 +472,7 @@ class PlotlyVisualizations:
             df: Player DataFrame with PCA_X, PCA_Y, Archetype columns
             height: Chart height in pixels
             width: Chart width in pixels
+            highlight_player: Optional player name to highlight with glow effect
             
         Returns:
             Plotly Figure with archetype universe map
@@ -569,6 +571,30 @@ class PlotlyVisualizations:
                 borderwidth=1,
             ),
         )
+        
+        # Add highlighted player if specified
+        if highlight_player:
+            highlight_data = plot_df[plot_df['Player'] == highlight_player]
+            if len(highlight_data) > 0:
+                fig.add_trace(go.Scatter(
+                    x=highlight_data['PCA_X'],
+                    y=highlight_data['PCA_Y'],
+                    mode='markers',
+                    marker=dict(
+                        size=20,
+                        color='gold',
+                        symbol='star',
+                        line=dict(width=3, color='yellow'),
+                    ),
+                    name=f'⭐ {highlight_player}',
+                    hovertemplate=f'<b>⭐ {highlight_player}</b><br>' +
+                                 'Squad: %{customdata[1]}<br>' +
+                                 'League: %{customdata[2]}<br>' +
+                                 'Position: %{customdata[4]}<br>' +
+                                 'Archetype: %{customdata[7]}<extra></extra>',
+                    customdata=highlight_data[['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'Ast/90', 'Archetype']],
+                    showlegend=True,
+                ))
         
         return fig
     

@@ -734,8 +734,73 @@ if st.session_state.page == '🔍 Player Search':
                                            f"{most_different_features[0][0]}")
                             except Exception as e:
                                 st.warning(f"Could not calculate similarity breakdown: {e}")
+                    
+                    # PDF Download Button
+                    st.divider()
+                    st.subheader("📥 Export Scouting Dossier")
+                    
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        st.write("Download a comprehensive one-page scouting report with radar chart and AI analysis")
+                    
+                    with col2:
+                        if st.button("📥 Download PDF Dossier", key='download_pdf_player_search'):
+                            try:
+                                from utils.pdf_export import create_recruitment_dossier
+                                from utils.llm_integration import generate_llm_narrative
+                                import tempfile
+                                import os
+                                
+                                # Generate narrative using LLM
+                                narrative = generate_llm_narrative(player_data, include_value=True)
+                                
+                                # Create temp PDF file
+                                temp_dir = tempfile.gettempdir()
+                                pdf_filename = f"scouting_dossier_{selected_player.replace(' ', '_')}.pdf"
+                                pdf_path = os.path.join(temp_dir, pdf_filename)
+                                
+                                # Generate PDF
+                                create_recruitment_dossier(player_data, narrative, pdf_path)
+                                
+                                # Read PDF for download
+                                with open(pdf_path, 'rb') as f:
+                                    pdf_data = f.read()
+                                
+                                st.download_button(
+                                    label="💾 Save PDF",
+                                    data=pdf_data,
+                                    file_name=pdf_filename,
+                                    mime="application/pdf",
+                                    key='save_pdf_button'
+                                )
+                                
+                                st.success("✓ PDF generated successfully!")
+                            except Exception as e:
+                                st.error(f"Failed to generate PDF: {e}")
         else:
             st.info("No players found. Try a different search term.")
+    else:
+        # Show Trending Prospects when search is empty
+        st.subheader("🌟 Trending Prospects (U23, Elite Stats)")
+        st.write("Young players with exceptional performance metrics (>80th percentile)")
+        
+        # Filter for trending prospects
+        trending = df[
+            (df['Age'] <= 23) &
+            ((df['Gls/90_pct'] >= 80) | (df['Ast/90_pct'] >= 80))
+        ].sort_values('Gls/90_pct', ascending=False)
+        
+        if len(trending) > 0:
+            display_cols = ['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'Gls/90_pct', 'Ast/90', 'Ast/90_pct', 'Archetype']
+            display_cols = [col for col in display_cols if col in trending.columns]
+            
+            st.dataframe(
+                trending[display_cols].head(10),
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("No trending prospects found with current filters.")
 
 # ============================================================================
 # PAGE 2: HEAD-TO-HEAD
@@ -829,6 +894,52 @@ elif st.session_state.page == '⚔️ Head-to-Head':
             
             comp_df = pd.DataFrame(comp_data)
             st.dataframe(comp_df, use_container_width=True, hide_index=True)
+            
+            # PDF Download Button
+            st.divider()
+            st.subheader("📥 Export Comparison Dossier")
+            
+            if st.button("📥 Download Comparison PDF", key='download_pdf_h2h'):
+                try:
+                    from utils.pdf_export import create_recruitment_dossier
+                    from utils.llm_integration import generate_llm_narrative
+                    import tempfile
+                    import os
+                    
+                    # Generate narrative for player 1 using LLM
+                    narrative = generate_llm_narrative(df[df['Player'] == player1].iloc[0], include_value=True)
+                    narrative += f"\n\nComparison: {player1} vs {player2} - Match Score: {comparison['match_score']:.1f}%"
+                    
+                    # Create temp PDF file
+                    temp_dir = tempfile.gettempdir()
+                    pdf_filename = f"comparison_{player1.replace(' ', '_')}_vs_{player2.replace(' ', '_')}.pdf"
+                    pdf_path = os.path.join(temp_dir, pdf_filename)
+                    
+                    # Generate PDF with comparison
+                    player1_data = df[df['Player'] == player1].iloc[0]
+                    player2_data = df[df['Player'] == player2].iloc[0]
+                    
+                    from utils.pdf_export import save_radar_chart_image
+                    radar_path = save_radar_chart_image(player1_data, player2_data)
+                    
+                    create_recruitment_dossier(player1_data, narrative, pdf_path, radar_image_path=radar_path)
+                    
+                    # Read PDF for download
+                    with open(pdf_path, 'rb') as f:
+                        pdf_data = f.read()
+                    
+                    st.download_button(
+                        label="💾 Save Comparison PDF",
+                        data=pdf_data,
+                        file_name=pdf_filename,
+                        mime="application/pdf",
+                        key='save_comparison_pdf'
+                    )
+                    
+                    st.success("✓ Comparison PDF generated successfully!")
+                except Exception as e:
+                    st.error(f"Failed to generate PDF: {e}")
+
 
 
 # ============================================================================
@@ -1117,7 +1228,7 @@ elif st.session_state.page == '🏆 Leaderboards':
     st.subheader(f"📊 Distribution Analysis - {metric}")
     
     # Create tabs for different views
-    tab1, tab2, tab3 = st.tabs(["📈 Histogram", "📦 League Comparison", "🎯 Top Performers"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Histogram", "📦 League Comparison", "🎯 Top Performers", "🌌 Tactical Style Map"])
     
     with tab1:
         # Histogram with percentile markers
@@ -1229,66 +1340,72 @@ elif st.session_state.page == '🏆 Leaderboards':
         )
         
         st.plotly_chart(fig, use_container_width=True)
+    
+    with tab4:
+        # Tactical Style Map (Archetype Universe)
+        st.write("**Tactical Hybrids**: Players positioned between archetypes represent hybrid playing styles")
+        
+        # Filter options for the universe map
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Player highlighting option
+            highlight_player_name = st.selectbox(
+                "Highlight specific player (optional):",
+                options=['None'] + sorted(df_filtered['Player'].unique()),
+                index=0,
+                key='highlight_player_universe'
+            )
+        
+        with col2:
+            # Get unique archetypes
+            all_archetypes = sorted(df_filtered['Archetype'].unique())
+            filter_archetype = st.selectbox(
+                "Filter by archetype:",
+                options=['All'] + all_archetypes,
+                index=0,
+                key='filter_archetype_universe'
+            )
+        
+        # Apply archetype filter if selected
+        if filter_archetype != 'All':
+            universe_df = df_filtered[df_filtered['Archetype'] == filter_archetype]
+        else:
+            universe_df = df_filtered
+        
+        # Create the universe map
+        highlight = None if highlight_player_name == 'None' else highlight_player_name
+        
+        universe_fig = PlotlyVisualizations.archetype_universe(
+            universe_df,
+            height=700,
+            highlight_player=highlight
+        )
+        
+        st.plotly_chart(universe_fig, use_container_width=True)
+        
+        # Explanation
+        with st.expander("ℹ️ How to read the Tactical Style Map"):
+            st.markdown("""
+            **What is this?**
+            - Each dot represents a player, positioned based on their playing style (PCA analysis)
+            - Players close together have similar statistical profiles
+            - Colors represent the assigned archetype
+            
+            **How to use it:**
+            - Hover over points to see player details
+            - Use the highlight feature to find a specific player
+            - Filter by archetype to focus on specific playing styles
+            - Look for players between clusters to find tactical hybrids
+            
+            **Scouting insights:**
+            - Players on the edge of their archetype cluster may be versatile
+            - Isolated players have unique statistical profiles
+            - Dense clusters indicate common playing styles in the dataset
+            """)
 
     
-    # NEW: PCA Archetype Universe Map
-    st.divider()
-    st.subheader("🌌 Archetype Universe - Player Style Map")
-    st.write("**Tactical Hybrids**: Players positioned between archetypes represent hybrid playing styles")
-    
-    # Filter options for the universe map
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        # Get unique archetypes
-        all_archetypes = sorted(df_filtered['Archetype'].unique())
-        selected_archetypes = st.multiselect(
-            "Filter by archetype (leave empty for all):",
-            options=all_archetypes,
-            default=[],
-            key='archetype_filter'
-        )
-    
-    with col2:
-        show_all = st.checkbox("Show all players", value=True, key='show_all_universe')
-    
-    # Create the universe map
-    if show_all or not selected_archetypes:
-        # Show all players
-        universe_fig = PlotlyVisualizations.archetype_universe(
-            df_filtered,
-            height=700,
-        )
-    else:
-        # Show filtered archetypes
-        universe_fig = PlotlyVisualizations.archetype_universe_filter(
-            df_filtered,
-            selected_archetypes=selected_archetypes,
-            height=700,
-        )
-    
-    st.plotly_chart(universe_fig, use_container_width=True)
-    
-    # Explanation
-    with st.expander("ℹ️ How to read the Archetype Universe"):
-        st.markdown("""
-        **What is this?**
-        - Each dot represents a player, positioned based on their playing style (PCA analysis)
-        - Players close together have similar statistical profiles
-        - Colors represent the assigned archetype
-        
-        **Finding Tactical Hybrids:**
-        - Look for players positioned **between** two archetype clusters
-        - These players combine characteristics from multiple playing styles
-        - Useful for finding versatile players or unique profiles
-        
-        **Technical Details:**
-        - Built using Principal Component Analysis (PCA) with 67.4% variance explained
-        - 2D projection of 9-dimensional feature space
-        - K-Means clustering (k=8) assigns archetype labels
-        """)
-    
-    # Show archetype statistics
+    # Archetype Distribution Statistics
     st.divider()
     st.subheader("📊 Archetype Distribution")
     
