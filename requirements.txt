@@ -1,0 +1,33 @@
+# Scouting Dashboard - Requirements
+
+# Core dependencies
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+
+# Visualization
+plotly>=5.17.0
+matplotlib>=3.7.0
+
+# Similarity & Search
+rapidfuzz>=3.0.0
+
+# PDF Generation
+fpdf>=1.7.2
+
+# Configuration
+pyyaml>=6.0
+
+# Web Scraping (for Transfermarkt)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# LLM Integration (Google Gemini)
+google-generativeai>=0.3.0
+
+# Optional: For better performance
+openpyxl>=3.1.0  # Excel export
+python-dotenv>=1.0.0  # Environment variables

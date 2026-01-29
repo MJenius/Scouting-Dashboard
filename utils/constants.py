@@ -225,53 +225,74 @@ ARCHETYPES = {
         'key_metrics': ['Int/90'],
         'color': '#2C3E50',  # Dark Blue-Gray
     },
-    'Elite Keeper': {
-        'description': 'Goalkeeper. High save percentage and distribution skills.',
+    # Goalkeeper Archetypes (separate clustering)
+    'Shot-Stopper': {
+        'description': 'Traditional goalkeeper. Elite shot-stopping, high save percentage.',
         'primary_position': 'GK',
-        'key_metrics': ['Save%', 'GA90'],
+        'key_metrics': ['Save%', 'Saves'],
         'color': '#34495E',  # Gray
     },
+    'Sweeper-Keeper': {
+        'description': 'Modern sweeper-keeper. Active outside box, good distribution.',
+        'primary_position': 'GK',
+        'key_metrics': ['Save%', 'CS%'],
+        'color': '#16A085',  # Teal
+    },
+    'Ball-Playing GK': {
+        'description': 'Ball-playing goalkeeper. Excellent distribution, comfortable with feet.',
+        'primary_position': 'GK',
+        'key_metrics': ['Save%', 'W'],
+        'color': '#27AE60',  # Green
+    },
+    'Elite Keeper': {
+        'description': 'All-round elite goalkeeper. Balanced across all GK metrics.',
+        'primary_position': 'GK',
+        'key_metrics': ['Save%', 'GA90', 'CS%'],
+        'color': '#8E44AD',  # Purple
+    },
 }
+
 
 ARCHETYPE_NAMES = list(ARCHETYPES.keys())
 
 # ============================================================================
 # POSITION-SPECIFIC WEIGHT MATRIX
 # Used for weighted cosine similarity in player comparisons
+# Higher weights = more important for similarity calculation
 # ============================================================================
 PROFILE_WEIGHTS = {
     'Attacker': {
-        'Gls/90': 3.0,
-        'Ast/90': 1.5,
-        'Sh/90': 2.5,
-        'SoT/90': 2.0,
-        'Crs/90': 1.0,
-        'Int/90': 0.3,
-        'TklW/90': 0.5,
-        'Fls/90': 1.0,
-        'Fld/90': 1.0,
+        'Gls/90': 5.0,    # Goals are critical for attackers
+        'Ast/90': 2.0,    # Assists matter but less than goals
+        'Sh/90': 3.5,     # Shot volume is very important
+        'SoT/90': 3.0,    # Shot accuracy is very important
+        'Crs/90': 1.2,    # Crosses matter for some attackers
+        'Int/90': 0.2,    # Defensive stats matter very little
+        'TklW/90': 0.3,   # Defensive stats matter very little
+        'Fls/90': 0.8,    # Discipline has some relevance
+        'Fld/90': 1.5,    # Drawing fouls is relevant (dribbling)
     },
     'Midfielder': {
-        'Gls/90': 0.5,
-        'Ast/90': 2.5,
-        'Sh/90': 0.8,
-        'SoT/90': 0.6,
-        'Crs/90': 2.0,
-        'Int/90': 1.5,
-        'TklW/90': 1.8,
-        'Fls/90': 1.2,
-        'Fld/90': 1.2,
+        'Gls/90': 1.0,    # Goals matter but not primary
+        'Ast/90': 3.5,    # Assists are critical for midfielders
+        'Sh/90': 1.2,     # Shot volume matters moderately
+        'SoT/90': 1.0,    # Shot accuracy matters moderately
+        'Crs/90': 2.5,    # Crossing is very important
+        'Int/90': 2.0,    # Defensive contribution important
+        'TklW/90': 2.2,   # Tackling is very important
+        'Fls/90': 1.5,    # Discipline matters
+        'Fld/90': 1.5,    # Drawing fouls matters
     },
     'Defender': {
-        'Gls/90': 0.2,
-        'Ast/90': 0.3,
-        'Sh/90': 0.1,
-        'SoT/90': 0.1,
-        'Crs/90': 0.5,
-        'Int/90': 2.5,
-        'TklW/90': 2.5,
-        'Fls/90': 1.5,
-        'Fld/90': 1.5,
+        'Gls/90': 0.1,    # Goals matter very little for defenders
+        'Ast/90': 0.2,    # Assists matter very little
+        'Sh/90': 0.1,     # Shots matter very little
+        'SoT/90': 0.1,    # Shot accuracy irrelevant
+        'Crs/90': 0.8,    # Crossing matters for attacking full-backs
+        'Int/90': 4.0,    # Interceptions are critical
+        'TklW/90': 4.0,   # Tackles are critical
+        'Fls/90': 2.0,    # Discipline is very important
+        'Fld/90': 1.8,    # Drawing fouls matters (positioning)
     },
     'Goalkeeper': {
         'GA90': 2.5,      # Goals Against per 90 (lower is better)
@@ -285,6 +306,7 @@ PROFILE_WEIGHTS = {
         'Saves': 1.0,     # Total saves
     },
 }
+
 
 # ============================================================================
 # PERCENTILE QUALITY FLAGS

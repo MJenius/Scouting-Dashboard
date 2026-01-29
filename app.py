@@ -13,6 +13,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import utilities
 from utils import (
@@ -300,27 +304,46 @@ if st.session_state.page == '🔍 Player Search':
                 
                 # Completeness score with professional confidence labels
                 completeness = player_data['Completeness_Score']
+                player_league = player_data['League']
                 
-                # Determine confidence label and color
-                if completeness >= 90:
-                    confidence_label = "🟢 Verified Elite Data"
-                    confidence_desc = "Full scouting confidence - all key metrics available"
-                elif completeness >= 70:
-                    confidence_label = "🟡 Good Scouting Data"
-                    confidence_desc = "Sufficient data for reliable assessment"
-                elif completeness >= 40:
-                    confidence_label = "🟠 Directional Data"
-                    confidence_desc = "Further vetting required - use with caution"
+                # Special handling for National League players (capped at 33% by design)
+                if player_league == 'National League':
+                    st.write("**📋 Data Availability**: 🔵 Limited Data Tier (National League)")
+                    st.caption(
+                        "_National League players have limited statistical coverage in our dataset. "
+                        "This does not reflect player quality—further manual scouting recommended._"
+                    )
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        st.info(
+                            "⚠️ **Scouting Note**: National League data is capped at 33% completeness by design. "
+                            "Use this profile for directional insights only."
+                        )
+                    with col2:
+                        st.metric("Data Coverage", f"{completeness:.0f}%")
                 else:
-                    confidence_label = "🔴 Incomplete Data"
-                    confidence_desc = "Caution advised - limited metrics available"
+                    # Standard confidence labels for other leagues
+                    # Determine confidence label and color
+                    if completeness >= 90:
+                        confidence_label = "🟢 Verified Elite Data"
+                        confidence_desc = "Full scouting confidence - all key metrics available"
+                    elif completeness >= 70:
+                        confidence_label = "🟡 Good Scouting Data"
+                        confidence_desc = "Sufficient data for reliable assessment"
+                    elif completeness >= 40:
+                        confidence_label = "🟠 Directional Data"
+                        confidence_desc = "Further vetting required - use with caution"
+                    else:
+                        confidence_label = "🔴 Incomplete Data"
+                        confidence_desc = "Caution advised - limited metrics available"
 
-                col1, col2 = st.columns([2, 1])
-                with col1:
-                    st.write(f"**Scouting Confidence**: {confidence_label}")
-                    st.caption(f"_{confidence_desc}_ ({completeness:.0f}% complete)")
-                with col2:
-                    st.metric("Completeness", f"{completeness:.0f}%")
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        st.write(f"**Scouting Confidence**: {confidence_label}")
+                        st.caption(f"_{confidence_desc}_ ({completeness:.0f}% complete)")
+                    with col2:
+                        st.metric("Completeness", f"{completeness:.0f}%")
+
                 
                 # Market Value
                 if 'Estimated_Value_£M' in player_data.index:
@@ -334,30 +357,82 @@ if st.session_state.page == '🔍 Player Search':
                 
                 st.divider()
                 
-                # Scout's Take - NEW FEATURE
+                # Scout's Take - ENHANCED WITH LLM
                 st.subheader("📝 Scout's Take")
+                
+                # Toggle for LLM vs rule-based
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write("Automated scouting report")
+                with col2:
+                    use_llm = st.checkbox(
+                        "🤖 Use AI",
+                        value=False,
+                        help="Use Google Gemini for context-aware narratives (requires API key)",
+                        key='use_llm_narrative'
+                    )
+                
                 with st.expander("View Automated Scouting Report", expanded=True):
                     try:
-                        narrative = generate_narrative_for_player(player_data, include_value=True)
-                        st.markdown(narrative)
-                        # PDF Export button
-                        from utils.pdf_export import export_scouting_pdf
-                        import tempfile
-                        import os
-                        if st.button("📄 Download Scouting Dossier (PDF)", key="download_pdf"):
-                            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmpfile:
-                                export_scouting_pdf(player_data, narrative, tmpfile.name)
-                                tmpfile.flush()
-                                with open(tmpfile.name, "rb") as f:
-                                    st.download_button(
-                                        label="Download PDF",
-                                        data=f.read(),
-                                        file_name=f"{player_data.get('Player','player')}_scouting_dossier.pdf",
-                                        mime="application/pdf"
-                                    )
-                                os.unlink(tmpfile.name)
+                        if use_llm:
+                            # Try LLM-powered generation
+                            from utils.llm_integration import generate_llm_narrative
+                            
+                            with st.spinner("Generating AI-powered scouting report..."):
+                                narrative = generate_llm_narrative(
+                                    player_data,
+                                    include_value=True,
+                                    use_llm=True
+                                )
+                            
+                            st.success("🤖 AI-Generated Report (Google Gemini)")
+                            st.markdown(narrative)
+                        else:
+                            # Use rule-based generation
+                            narrative = generate_narrative_for_player(player_data, include_value=True)
+                            st.info("📋 Rule-Based Report")
+                            st.markdown(narrative)
+                    except RuntimeError as e:
+                        # AI not available or failed
+                        st.error(f"❌ AI Generation Failed: {e}")
+                        st.warning("💡 **AI is not integrated.** Please check your GEMINI_API_KEY in the .env file.")
+                        st.info("Uncheck '🤖 Use AI' to see the rule-based report instead.")
                     except Exception as e:
-                        st.error(f"Could not generate narrative: {e}")
+                        st.error(f"❌ Error generating narrative: {e}")
+
+                
+                # PDF Export button - ENHANCED
+                st.divider()
+                st.subheader("📄 Export Scouting Dossier")
+                st.write("Generate a professional PDF report for recruitment meetings")
+                
+                try:
+                    from utils.pdf_export import export_scouting_pdf
+                    import tempfile
+                    import os
+                    
+                    # Generate PDF in memory
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmpfile:
+                        export_scouting_pdf(player_data, narrative, tmpfile.name)
+                        tmpfile.flush()
+                        
+                        with open(tmpfile.name, "rb") as f:
+                            pdf_data = f.read()
+                        
+                        os.unlink(tmpfile.name)
+                    
+                    # Direct download button
+                    st.download_button(
+                        label="📥 Download PDF Scouting Dossier",
+                        data=pdf_data,
+                        file_name=f"{player_data.get('Player','player').replace(' ', '_')}_scouting_report.pdf",
+                        mime="application/pdf",
+                        help="Download a one-page scouting dossier for recruitment meetings",
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.warning(f"PDF export unavailable: {e}")
+
                 
                 st.divider()
                 
@@ -391,10 +466,127 @@ if st.session_state.page == '🔍 Player Search':
                     pct_df = PlotlyVisualizations.percentile_progress_bars(percentiles)
                     st.dataframe(pct_df, use_container_width=True, hide_index=True)
                 
+                
+                st.divider()
+                
+                # NEW: Age-Curve Anomaly Detection (High-Ceiling Prospects)
+                st.subheader("🌟 Age-Curve Analysis")
+                
+                try:
+                    from utils.age_curve_analysis import AgeCurveAnalyzer, format_age_curve_badge
+                    
+                    analyzer = AgeCurveAnalyzer(df)
+                    
+                    # Let user select metric to analyze
+                    col1, col2 = st.columns([2, 1])
+                    
+                    with col1:
+                        st.write("**Select metric to analyze:**")
+                    
+                    with col2:
+                        # Position-specific metric options
+                        if is_goalkeeper:
+                            available_metrics = ['Save%', 'GA90', 'CS%', 'Saves']
+                            default_metric = 'Save%'
+                        elif player_data['Primary_Pos'] == 'FW':
+                            available_metrics = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Fld/90']
+                            default_metric = 'Gls/90'
+                        elif player_data['Primary_Pos'] == 'MF':
+                            available_metrics = ['Ast/90', 'Gls/90', 'Crs/90', 'TklW/90', 'Int/90']
+                            default_metric = 'Ast/90'
+                        else:  # DF
+                            available_metrics = ['Int/90', 'TklW/90', 'Crs/90', 'Ast/90']
+                            default_metric = 'Int/90'
+                        
+                        # Filter to only metrics that exist in the data
+                        available_metrics = [m for m in available_metrics if m in df.columns]
+                        
+                        if len(available_metrics) > 0:
+                            key_metric = st.selectbox(
+                                "Metric",
+                                options=available_metrics,
+                                index=0 if default_metric not in available_metrics else available_metrics.index(default_metric),
+                                key='age_curve_metric',
+                                label_visibility='collapsed'
+                            )
+                        else:
+                            key_metric = default_metric
+                    
+                    # Get age-curve status for selected metric
+                    age_status = analyzer.get_player_age_curve_status(
+                        selected_player,
+                        key_metric
+                    )
+                    
+                    if age_status:
+                        col1, col2, col3 = st.columns([2, 1, 1])
+                        
+                        with col1:
+                            # Show badge if high-ceiling
+                            if age_status.is_high_ceiling:
+                                badge = format_age_curve_badge(age_status)
+                                st.success(f"**{badge}**")
+                                st.caption(
+                                    f"This player's {key_metric} ({age_status.player_value:.2f}) is "
+                                    f"{age_status.z_score:.1f} standard deviations above the average "
+                                    f"for {age_status.age}-year-olds in {age_status.league}."
+                                )
+                            else:
+                                st.info(
+                                    f"**Age-Appropriate Performance** - "
+                                    f"{key_metric}: {age_status.player_value:.2f} "
+                                    f"(Age cohort average: {age_status.age_mean:.2f})"
+                                )
+                        
+                        with col2:
+                            st.metric(
+                                "Z-Score",
+                                f"{age_status.z_score:.2f}",
+                                help="Standard deviations above age cohort mean"
+                            )
+                        
+                        with col3:
+                            st.metric(
+                                "Age Percentile",
+                                f"{age_status.percentile_rank:.0f}%",
+                                help="Rank within same-age players"
+                            )
+                        
+                        # Show age cohort comparison
+                        with st.expander(f"📊 View Age Cohort Comparison ({key_metric})"):
+                            age_curves = analyzer.calculate_age_curves(
+                                key_metric,
+                                position=player_data['Primary_Pos'],
+                                league=player_data['League']
+                            )
+                            
+                            if len(age_curves) > 0:
+                                from utils.visualizations import PlotlyVisualizations
+                                age_curve_fig = PlotlyVisualizations.age_curve(
+                                    df[df['Primary_Pos'] == player_data['Primary_Pos']],
+                                    key_metric,
+                                    position=player_data['Primary_Pos'],
+                                    target_player=selected_player,
+                                    height=400
+                                )
+                                st.plotly_chart(age_curve_fig, use_container_width=True)
+                                
+                                st.write(f"**Age {age_status.age} Statistics ({player_data['Primary_Pos']}, {player_data['League']}):**")
+                                st.write(f"- Mean: {age_status.age_mean:.2f}")
+                                st.write(f"- Std Dev: {age_status.age_std:.2f}")
+                                st.write(f"- Player Value: {age_status.player_value:.2f}")
+                    else:
+                        st.info("Age-curve analysis unavailable (insufficient age cohort data)")
+                
+                except Exception as e:
+                    st.warning(f"Age-curve analysis unavailable: {e}")
+
+                
                 st.divider()
                 
                 # Similar players
                 st.subheader("👥 Top 5 Similar Players")
+
                 
                 col1, col2 = st.columns([2, 1])
                 with col1:
@@ -424,12 +616,68 @@ if st.session_state.page == '🔍 Player Search':
                     
                     # Only include columns that exist in the data
                     display_cols = [col for col in display_cols if col in similar.columns]
-                    st.dataframe(
-                        similar[display_cols].rename(columns={'Match_Score': 'Similarity %'}),
-                        use_container_width=True,
-                        hide_index=True
-                    )
                     
+                    # NEW: Add similarity driver for each player
+                    st.write("**Top 5 Similar Players** (with primary similarity drivers)")
+                    
+                    for idx, (_, row) in enumerate(similar.head(5).iterrows(), 1):
+                        match_player = row['Player']
+                        match_score = row['Match_Score']
+                        
+                        # Calculate feature attribution for this match
+                        try:
+                            attribution = engine.calculate_feature_attribution(
+                                selected_player,
+                                match_player,
+                                use_position_weights=use_weights
+                            )
+                            
+                            if attribution:
+                                # Get top 2 most similar features (primary drivers)
+                                top_drivers = list(attribution.items())[:2]
+                                driver_text = ", ".join([f"{feat}" for feat, _ in top_drivers])
+                                
+                                # Create expander for each match
+                                with st.expander(
+                                    f"#{idx}: {match_player} - {match_score:.1f}% Match "
+                                    f"(Driven by: {driver_text})",
+                                    expanded=(idx == 1)
+                                ):
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric("Squad", row['Squad'])
+                                    with col2:
+                                        st.metric("League", row['League'])
+                                    with col3:
+                                        st.metric("Position", row['Primary_Pos'])
+                                    
+                                    # Show key stats
+                                    st.write("**Key Stats:**")
+                                    stat_cols = st.columns(3)
+                                    if 'Gls/90' in row.index:
+                                        stat_cols[0].metric("Gls/90", f"{row['Gls/90']:.2f}")
+                                    if 'Ast/90' in row.index:
+                                        stat_cols[1].metric("Ast/90", f"{row['Ast/90']:.2f}")
+                                    if 'Age' in row.index:
+                                        stat_cols[2].metric("Age", int(row['Age']))
+                                    
+                                    # Show similarity breakdown
+                                    st.write("**Similarity Breakdown:**")
+                                    for feat, dist in list(attribution.items())[:5]:
+                                        similarity_pct = int((1 - dist) * 100)
+                                        bar_length = int(similarity_pct / 5)
+                                        bar = "█" * bar_length + "░" * (20 - bar_length)
+                                        st.write(f"{feat}: {bar} {similarity_pct}%")
+                            else:
+                                # Fallback if attribution fails
+                                st.write(f"**#{idx}: {match_player}** - {match_score:.1f}% Match")
+                                st.write(f"Squad: {row['Squad']} | League: {row['League']}")
+                        except Exception as e:
+                            # Fallback display
+                            st.write(f"**#{idx}: {match_player}** - {match_score:.1f}% Match")
+                            st.write(f"Squad: {row['Squad']} | League: {row['League']}")
+                    
+
                     # NEW: Similarity Driver Analysis
                     st.divider()
                     st.subheader("🔍 Explainable Similarity - What Makes Them Similar?")
@@ -863,17 +1111,208 @@ elif st.session_state.page == '🏆 Leaderboards':
         hide_index=True
     )
     
-    # Beeswarm visualization
-    st.divider()
-    st.subheader(f"📊 Distribution - {metric}")
     
-    beeswarm = PlotlyVisualizations.beeswarm_by_metric(
-        board_df,
-        metric,
-        league if league != 'all' else 'all',
-        height=500
-    )
-    st.plotly_chart(beeswarm, use_container_width=True)
+    # Distribution visualization - IMPROVED
+    st.divider()
+    st.subheader(f"📊 Distribution Analysis - {metric}")
+    
+    # Create tabs for different views
+    tab1, tab2, tab3 = st.tabs(["📈 Histogram", "📦 League Comparison", "🎯 Top Performers"])
+    
+    with tab1:
+        # Histogram with percentile markers
+        import plotly.graph_objects as go
+        
+        fig = go.Figure()
+        
+        # Add histogram
+        fig.add_trace(go.Histogram(
+            x=board_df[metric],
+            nbinsx=30,
+            name='Distribution',
+            marker=dict(
+                color='#3498DB',
+                line=dict(color='white', width=1)
+            ),
+            opacity=0.75,
+        ))
+        
+        # Add mean line
+        mean_val = board_df[metric].mean()
+        fig.add_vline(
+            x=mean_val,
+            line_dash='dash',
+            line_color='#E74C3C',
+            line_width=2,
+            annotation_text=f'Mean: {mean_val:.2f}',
+            annotation_position='top'
+        )
+        
+        # Add median line
+        median_val = board_df[metric].median()
+        fig.add_vline(
+            x=median_val,
+            line_dash='dot',
+            line_color='#F39C12',
+            line_width=2,
+            annotation_text=f'Median: {median_val:.2f}',
+            annotation_position='bottom'
+        )
+        
+        fig.update_layout(
+            title=f'{metric} Distribution - {league if league != "all" else "All Leagues"}',
+            xaxis_title=metric,
+            yaxis_title='Player Count',
+            height=450,
+            template='plotly_dark',
+            showlegend=False,
+            hovermode='x',
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Stats summary
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("25th Percentile", f"{board_df[metric].quantile(0.25):.2f}")
+        with col2:
+            st.metric("50th Percentile", f"{board_df[metric].quantile(0.50):.2f}")
+        with col3:
+            st.metric("75th Percentile", f"{board_df[metric].quantile(0.75):.2f}")
+        with col4:
+            st.metric("Std Dev", f"{board_df[metric].std():.2f}")
+    
+    with tab2:
+        # Box plot by league
+        if league == 'all' and len(board_df['League'].unique()) > 1:
+            league_box = PlotlyVisualizations.league_comparison(
+                board_df,
+                metric,
+                height=450
+            )
+            st.plotly_chart(league_box, use_container_width=True)
+            
+            # League stats table
+            st.write("**League Statistics:**")
+            league_stats = board_df.groupby('League')[metric].agg(['mean', 'median', 'std', 'count']).round(2)
+            league_stats.columns = ['Mean', 'Median', 'Std Dev', 'Players']
+            league_stats = league_stats.sort_values('Mean', ascending=False)
+            st.dataframe(league_stats, use_container_width=True)
+        else:
+            st.info("Select 'all' leagues to see league comparison")
+    
+    with tab3:
+        # Scatter plot of top performers
+        import plotly.express as px
+        
+        top_50 = board_df.head(50)
+        
+        fig = px.scatter(
+            top_50,
+            x='Age',
+            y=metric,
+            color='League',
+            size=f'{metric}_pct',
+            hover_data=['Player', 'Squad', 'Primary_Pos'],
+            title=f'Top 50 Players - {metric} vs Age',
+            color_discrete_map=LEAGUE_COLORS,
+            labels={
+                'Age': 'Age',
+                metric: metric,
+                f'{metric}_pct': 'Percentile'
+            }
+        )
+        
+        fig.update_layout(
+            height=450,
+            template='plotly_dark',
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+    
+    # NEW: PCA Archetype Universe Map
+    st.divider()
+    st.subheader("🌌 Archetype Universe - Player Style Map")
+    st.write("**Tactical Hybrids**: Players positioned between archetypes represent hybrid playing styles")
+    
+    # Filter options for the universe map
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Get unique archetypes
+        all_archetypes = sorted(df_filtered['Archetype'].unique())
+        selected_archetypes = st.multiselect(
+            "Filter by archetype (leave empty for all):",
+            options=all_archetypes,
+            default=[],
+            key='archetype_filter'
+        )
+    
+    with col2:
+        show_all = st.checkbox("Show all players", value=True, key='show_all_universe')
+    
+    # Create the universe map
+    if show_all or not selected_archetypes:
+        # Show all players
+        universe_fig = PlotlyVisualizations.archetype_universe(
+            df_filtered,
+            height=700,
+        )
+    else:
+        # Show filtered archetypes
+        universe_fig = PlotlyVisualizations.archetype_universe_filter(
+            df_filtered,
+            selected_archetypes=selected_archetypes,
+            height=700,
+        )
+    
+    st.plotly_chart(universe_fig, use_container_width=True)
+    
+    # Explanation
+    with st.expander("ℹ️ How to read the Archetype Universe"):
+        st.markdown("""
+        **What is this?**
+        - Each dot represents a player, positioned based on their playing style (PCA analysis)
+        - Players close together have similar statistical profiles
+        - Colors represent the assigned archetype
+        
+        **Finding Tactical Hybrids:**
+        - Look for players positioned **between** two archetype clusters
+        - These players combine characteristics from multiple playing styles
+        - Useful for finding versatile players or unique profiles
+        
+        **Technical Details:**
+        - Built using Principal Component Analysis (PCA) with 67.4% variance explained
+        - 2D projection of 9-dimensional feature space
+        - K-Means clustering (k=8) assigns archetype labels
+        """)
+    
+    # Show archetype statistics
+    st.divider()
+    st.subheader("📊 Archetype Distribution")
+    
+    archetype_counts = df_filtered['Archetype'].value_counts().reset_index()
+    archetype_counts.columns = ['Archetype', 'Count']
+    archetype_counts['Percentage'] = (archetype_counts['Count'] / len(df_filtered) * 100).round(1)
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Create pie chart
+        archetype_pie = PlotlyVisualizations.archetype_distribution(
+            df_filtered,
+            league=league if league != 'all' else 'all',
+            height=400
+        )
+        st.plotly_chart(archetype_pie, use_container_width=True)
+    
+    with col2:
+        st.dataframe(
+            archetype_counts,
+            use_container_width=True,
+            hide_index=True
+        )
 
 # ============================================================================
 # FOOTER

@@ -334,20 +334,18 @@ def cluster_players(
     df: pd.DataFrame,
     scaled_features: np.ndarray,
     n_clusters: int = 8,
-) -> Tuple[pd.DataFrame, PlayerArchetypeClusterer]:
+) -> Tuple[pd.DataFrame, 'PlayerArchetypeClusterer']:
     """
-    Main entry point: Cluster all players and assign archetypes.
+    Assign players to archetypes using K-Means clustering.
+
     
-    This function:
-    1. Fits K-Means model
-    2. Analyzes clusters and assigns archetype labels
-    3. Computes PCA projection for visualization
-    4. Returns enhanced DataFrame with archetype assignments
+    IMPORTANT: Goalkeepers are clustered separately from outfield players
+    using GK-specific stats (Save%, GA90, etc.) to avoid cross-contamination.
     
     Args:
-        df: Player DataFrame from data_engine
-        scaled_features: Scaled feature array from data_engine
-        n_clusters: Number of clusters (default: 8)
+        df: Player DataFrame with position info
+        scaled_features: Normalized feature array from data_engine
+        n_clusters: Number of clusters for outfield players (default: 8)
         
     Returns:
         Tuple of:
@@ -359,17 +357,87 @@ def cluster_players(
     print("🎯 STARTING PLAYER ARCHETYPE CLUSTERING")
     print("=" * 80)
     
-    # Create clusterer
-    clusterer = PlayerArchetypeClusterer(scaled_features, n_clusters=n_clusters)
+    # Separate goalkeepers from outfield players
+    is_gk = df['Primary_Pos'] == 'GK'
+    df_gk = df[is_gk].copy()
+    df_outfield = df[~is_gk].copy()
     
-    # Fit and analyze
-    clusterer.fit(df)
+    print(f"\n[Clustering] Splitting dataset:")
+    print(f"  - Goalkeepers: {len(df_gk)} players")
+    print(f"  - Outfield: {len(df_outfield)} players")
+    
+    # Get indices for proper feature slicing
+    gk_indices = df[is_gk].index
+    outfield_indices = df[~is_gk].index
+    
+    # Cluster outfield players (8 clusters)
+    if len(df_outfield) > 0:
+        print(f"\n[Clustering] Processing outfield players...")
+        outfield_features = scaled_features[~is_gk]
+        
+        clusterer_outfield = PlayerArchetypeClusterer(outfield_features, n_clusters=n_clusters)
+        clusterer_outfield.fit(df_outfield)
+        df_outfield_clustered = clusterer_outfield.player_archetypes
+    else:
+        df_outfield_clustered = df_outfield
+    
+    # Cluster goalkeepers separately (3 clusters for GK archetypes)
+    if len(df_gk) > 0:
+        print(f"\n[Clustering] Processing goalkeepers with GK-specific stats...")
+        
+        # Use GK-specific features if available
+        from .constants import GK_FEATURE_COLUMNS
+        
+        # Get GK features (use subset of scaled features for GKs)
+        gk_features = scaled_features[is_gk]
+        
+        # Cluster with fewer clusters (3 GK archetypes)
+        n_gk_clusters = min(3, len(df_gk))  # Max 3 GK archetypes
+        
+        if n_gk_clusters >= 2:
+            clusterer_gk = PlayerArchetypeClusterer(gk_features, n_clusters=n_gk_clusters)
+            clusterer_gk.fit(df_gk)
+            df_gk_clustered = clusterer_gk.player_archetypes
+            
+            # Override archetype labels with GK-specific ones
+            gk_archetype_map = {
+                0: 'Shot-Stopper',
+                1: 'Sweeper-Keeper',
+                2: 'Ball-Playing GK',
+            }
+            
+            # Map cluster IDs to GK archetypes
+            df_gk_clustered['Archetype'] = df_gk_clustered['Cluster'].map(
+                lambda x: gk_archetype_map.get(x, 'Elite Keeper')
+            )
+            
+            print(f"✓ Assigned {len(df_gk_clustered)} goalkeepers to {n_gk_clusters} GK archetypes")
+        else:
+            # Too few GKs, assign default archetype
+            df_gk_clustered = df_gk.copy()
+            df_gk_clustered['Archetype'] = 'Elite Keeper'
+            df_gk_clustered['Cluster'] = 0
+            df_gk_clustered['Archetype_Confidence'] = 1.0
+            df_gk_clustered['PCA_X'] = 0
+            df_gk_clustered['PCA_Y'] = 0
+            print(f"⚠ Too few goalkeepers for clustering, assigned default archetype")
+    else:
+        df_gk_clustered = df_gk
+    
+    # Combine results
+    df_combined = pd.concat([df_outfield_clustered, df_gk_clustered], axis=0)
+    
+    # Sort back to original order
+    df_combined = df_combined.loc[df.index]
     
     print("\n" + "=" * 80)
     print("✓ CLUSTERING COMPLETE")
+    print(f"  - Outfield archetypes: {df_combined[~is_gk]['Archetype'].nunique()}")
+    print(f"  - GK archetypes: {df_combined[is_gk]['Archetype'].nunique()}")
     print("=" * 80)
     
-    return clusterer.player_archetypes, clusterer
+    # Return combined DataFrame and outfield clusterer (for compatibility)
+    return df_combined, clusterer_outfield if len(df_outfield) > 0 else None
 
 
 # ============================================================================

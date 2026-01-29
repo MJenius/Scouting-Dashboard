@@ -58,6 +58,13 @@ from .config_loader import (
     get_config,
 )
 
+from .age_curve_analysis import (
+    AgeCurveAnalyzer,
+    AgeCurveAnomaly,
+    format_age_curve_badge,
+)
+
+
 __all__ = [
     # Constants
     'FEATURE_COLUMNS',
@@ -98,4 +105,9 @@ __all__ = [
     # Config
     'ConfigLoader',
     'get_config',
+    # Age Curve Analysis
+    'AgeCurveAnalyzer',
+    'AgeCurveAnomaly',
+    'format_age_curve_badge',
 ]
+
