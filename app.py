@@ -116,15 +116,15 @@ def ensure_data_loaded():
 # ============================================================================
 
 with st.sidebar:
-        st.subheader("Scout Bias Settings")
-        bias_options = ["Conservative", "Neutral", "Aggressive"]
-        selected_bias = st.selectbox(
-            "Market Value Bias:",
-            options=bias_options,
-            index=bias_options.index("Neutral"),
-            help="Adjusts the multiplier for market value estimation."
-        )
-        st.session_state['scout_bias'] = selected_bias
+    st.subheader("Scout Bias Settings")
+    bias_options = ["Conservative", "Neutral", "Aggressive"]
+    selected_bias = st.selectbox(
+        "Market Value Bias:",
+        options=bias_options,
+        index=bias_options.index("Neutral"),
+        help="Adjusts the multiplier for market value estimation."
+    )
+    st.session_state['scout_bias'] = selected_bias
     st.title("⚙️ Filters & Settings")
     
     # Age filter
@@ -306,16 +306,16 @@ if st.session_state.page == '🔍 Player Search':
                     confidence_label = "🟢 Verified Elite Data"
                     confidence_desc = "Full scouting confidence - all key metrics available"
                 elif completeness >= 70:
-                    if suggestions:
-                        # Create selectbox from suggestions
-                        player_options = [s[0] for s in suggestions]
-                        selected_player = st.selectbox(
-                            "Select player:",
-                            options=player_options,
-                            key='selected_player'
-                        )
-            
-                        if selected_player:
+                    confidence_label = "🟡 Good Scouting Data"
+                    confidence_desc = "Sufficient data for reliable assessment"
+                elif completeness >= 40:
+                    confidence_label = "🟠 Directional Data"
+                    confidence_desc = "Further vetting required - use with caution"
+                else:
+                    confidence_label = "🔴 Incomplete Data"
+                    confidence_desc = "Caution advised - limited metrics available"
+
+                col1, col2 = st.columns([2, 1])
                 with col1:
                     st.write(f"**Scouting Confidence**: {confidence_label}")
                     st.caption(f"_{confidence_desc}_ ({completeness:.0f}% complete)")
@@ -526,29 +526,12 @@ elif st.session_state.page == '⚔️ Head-to-Head':
             with col1:
                 st.metric(f"📍 {p1['name']}", f"{p1['league']} | {p1['position']}")
             with col2:
-                    else:
-                        st.info("No players found. Try a different search term.")
-                        # Trending Prospects: U21, 90+ percentile
-                        st.subheader("🔥 Trending Prospects (U21, 90+ percentile)")
-                        trending = df[(df['Age'] <= 21) & (df['Gls/90_pct'] >= 90)]
-                        if len(trending) == 0:
-                            trending = df[(df['Age'] <= 21)].sort_values('Gls/90_pct', ascending=False).head(5)
-                        else:
-                            trending = trending.sort_values('Gls/90_pct', ascending=False).head(5)
-                        if len(trending) > 0:
-                            st.dataframe(
-                                trending[['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'Gls/90_pct', 'Archetype']].reset_index(drop=True),
-                                use_container_width=True,
-                                hide_index=True
-                            )
-                        else:
-                            st.write("No trending prospects found in the current dataset.")
                 st.metric("Age", f"{int(p1['age'])} vs {int(p2['age'])}")
             with col3:
                 st.metric(f"⚡ {p2['name']}", f"{p2['league']} | {p2['position']}")
             with col4:
                 st.metric("Match Score", f"{comparison['match_score']:.1f}%")
-            
+
             st.divider()
             
             # Check if both players are goalkeepers
@@ -888,73 +871,6 @@ elif st.session_state.page == '🏆 Leaderboards':
         board_df,
         metric,
         league if league != 'all' else 'all',
-        height=500
-    )
-    st.plotly_chart(beeswarm, use_container_width=True)
-    
-    # NEW: Archetype Universe Tab
-    st.divider()
-    st.subheader("🌌 Archetype Universe - Player Style Map")
-    
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        st.write("**Interactive 2D map of all players by their playing style (PCA projection).**")
-        st.write("Players close together have similar profiles. Colors represent different archetypes.")
-    
-    with col2:
-        universe_mode = st.radio(
-            "View mode:",
-            options=["All Players", "Filtered"],
-            horizontal=True,
-            key="universe_mode"
-        )
-    
-    if universe_mode == "All Players":
-        # Show all players in the universe
-        universe_fig = PlotlyVisualizations.archetype_universe(df_filtered)
-        st.plotly_chart(universe_fig, use_container_width=True)
-    else:
-        # Filtered view - let user select archetypes
-        st.write("**Select archetypes to highlight:**")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        archetype_list = df_filtered['Archetype'].unique().tolist()
-        selected_archs = []
-        
-        for idx, arch in enumerate(sorted(archetype_list)):
-            col_idx = idx % 4
-            with [col1, col2, col3, col4][col_idx]:
-                if st.checkbox(arch, value=False, key=f"arch_filter_{arch}"):
-                    selected_archs.append(arch)
-        
-        if selected_archs:
-            filtered_universe = PlotlyVisualizations.archetype_universe_filter(
-                df_filtered,
-                selected_archetypes=selected_archs
-            )
-            st.plotly_chart(filtered_universe, use_container_width=True)
-            
-            # Show stats for selected archetypes
-            st.divider()
-            st.subheader(f"📊 Statistics - {', '.join(selected_archs)}")
-            
-            selected_df = df_filtered[df_filtered['Archetype'].isin(selected_archs)]
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("Players", len(selected_df))
-            with col2:
-                st.metric("Avg Age", f"{selected_df['Age'].mean():.1f}")
-            with col3:
-                st.metric("Avg Goals/90", f"{selected_df['Gls/90'].mean():.2f}")
-            with col4:
-                st.metric("Avg Assists/90", f"{selected_df['Ast/90'].mean():.2f}")
-        else:
-            st.info("Select one or more archetypes above to view filtered universe")
-
         height=500
     )
     st.plotly_chart(beeswarm, use_container_width=True)
