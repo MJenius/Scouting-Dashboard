@@ -361,19 +361,108 @@ class ScoutNarrativeGenerator:
                 percentiles.append(player_data[pct_col])
         
         return np.mean(percentiles) if percentiles else 0.0
+    
+    def analyze_statistical_variance(self, player_data: pd.Series) -> Dict[str, str]:
+        """
+        Analyze variance in player performance across metrics.
+        
+        High variance = inconsistent performance (e.g., elite shooter but poor passer)
+        Low variance = balanced player
+        
+        Returns:
+            Dict with variance analysis insights
+        """
+        # Collect percentile data
+        percentiles = []
+        position = player_data.get('Primary_Pos', 'MF')
+        
+        for feat in FEATURE_COLUMNS:
+            pct_col = f'{feat}_pct'
+            if pct_col in player_data.index and not pd.isna(player_data[pct_col]):
+                percentiles.append(player_data[pct_col])
+        
+        if not percentiles:
+            return {
+                'variance_type': 'Unknown',
+                'analysis': 'Insufficient percentile data for variance analysis.',
+            }
+        
+        percentiles = np.array(percentiles)
+        variance = np.var(percentiles)
+        std_dev = np.std(percentiles)
+        min_pct = np.min(percentiles)
+        max_pct = np.max(percentiles)
+        avg_pct = np.mean(percentiles)
+        
+        # Classify variance
+        if variance > 300:  # High variance threshold
+            variance_type = "High Variance"
+            interpretation = (
+                f"This player shows **highly inconsistent performance** across metrics. "
+                f"Elite in some areas (top {100 - max_pct:.0f}%) but struggles in others (bottom {min_pct:.0f}%). "
+                f"Typical of specialists or players with a clear strength/weakness profile."
+            )
+        elif variance > 100:
+            variance_type = "Moderate Variance"
+            interpretation = (
+                f"This player shows **good specialization**. Stronger in some areas "
+                f"({100 - max_pct:.0f}th percentile) than others ({min_pct:.0f}th percentile). "
+                f"Suitable for tactical roles that leverage strengths."
+            )
+        else:
+            variance_type = "Low Variance"
+            interpretation = (
+                f"This player is **well-rounded**, showing consistent performance across metrics "
+                f"(range: {min_pct:.0f}-{100 - max_pct:.0f}th percentile). "
+                f"Valuable for flexible tactical systems and positional versatility."
+            )
+        
+        # Risk assessment for high performers
+        if max_pct >= 90 and variance > 200:
+            risk = (
+                f"⚠️  **Risk Alert**: Elite shooting ({100 - max_pct:.0f}th percentile) but low volume "
+                f"({min_pct:.0f}th percentile on Sh/90). May indicate overperformance or "
+                f"limited playing time. Monitor sustainability."
+            )
+        else:
+            risk = None
+        
+        return {
+            'variance_type': variance_type,
+            'variance_score': float(variance),
+            'std_dev': float(std_dev),
+            'interpretation': interpretation,
+            'range': f"{min_pct:.0f}-{100 - max_pct:.0f}th percentile",
+            'risk_note': risk,
+        }
 
 
-def generate_narrative_for_player(player_data: pd.Series, include_value: bool = False) -> str:
+def generate_narrative_for_player(player_data: pd.Series, include_value: bool = False, include_variance: bool = True) -> str:
     """
     Convenience function to generate a full scout's take narrative.
     
     Args:
         player_data: Player row from DataFrame
         include_value: Whether to include market value in recommendation
+        include_variance: Whether to include variance analysis
         
     Returns:
         Complete narrative text
     """
     generator = ScoutNarrativeGenerator()
     report = generator.generate_scouts_take(player_data, include_value)
+    
+    if include_variance:
+        # Add variance analysis
+        variance_analysis = generator.analyze_statistical_variance(player_data)
+        variance_section = (
+            f"\n\n**Performance Consistency**: {variance_analysis['variance_type']}\n"
+            f"{variance_analysis['interpretation']}"
+        )
+        if variance_analysis.get('risk_note'):
+            variance_section += f"\n{variance_analysis['risk_note']}"
+        
+        report['full_report'] += variance_section
+    
     return report['full_report']
+

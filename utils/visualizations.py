@@ -454,6 +454,226 @@ class PlotlyVisualizations:
         )
         
         return fig
+    
+    @staticmethod
+    def archetype_universe(
+        df: pd.DataFrame,
+        height: int = 700,
+        width: int = 1000,
+    ) -> go.Figure:
+        """
+        Create interactive 2D scatter plot of players by PCA coordinates colored by archetype.
+        
+        This visualization shows the "player universe" where each dot is a player and their
+        position reflects their overall playing style. Players close together have similar profiles.
+        
+        Args:
+            df: Player DataFrame with PCA_X, PCA_Y, Archetype columns
+            height: Chart height in pixels
+            width: Chart width in pixels
+            
+        Returns:
+            Plotly Figure with archetype universe map
+        """
+        # Ensure PCA coordinates exist
+        if 'PCA_X' not in df.columns or 'PCA_Y' not in df.columns:
+            raise ValueError("DataFrame must contain PCA_X and PCA_Y columns from clustering")
+        
+        plot_df = df.copy()
+        
+        # Create color mapping for archetypes
+        archetype_colors = {}
+        for archetype in plot_df['Archetype'].unique():
+            # Try to get color from ARCHETYPES constant, fallback to generated color
+            if archetype in ARCHETYPES:
+                archetype_colors[archetype] = ARCHETYPES[archetype].get('color', '#95A5A6')
+            else:
+                archetype_colors[archetype] = '#95A5A6'  # Gray for unknown
+        
+        # Create figure
+        fig = px.scatter(
+            plot_df,
+            x='PCA_X',
+            y='PCA_Y',
+            color='Archetype',
+            hover_data={
+                'Player': True,
+                'Squad': True,
+                'League': True,
+                'Age': True,
+                'Primary_Pos': True,
+                'Gls/90': ':.2f',
+                'Ast/90': ':.2f',
+                'Archetype': True,
+                'PCA_X': False,
+                'PCA_Y': False,
+            },
+            color_discrete_map=archetype_colors,
+            title='Archetype Universe: Player Style Map (PCA-2D Projection)',
+            labels={
+                'PCA_X': 'Playing Style Axis 1',
+                'PCA_Y': 'Playing Style Axis 2',
+            },
+            height=height,
+            width=width,
+        )
+        
+        # Customize layout
+        fig.update_traces(
+            marker=dict(
+                size=6,
+                opacity=0.7,
+                line=dict(width=0.5, color='white'),
+            ),
+            hovertemplate='<b>%{customdata[0]}</b><br>' +
+                         'Squad: %{customdata[1]}<br>' +
+                         'League: %{customdata[2]}<br>' +
+                         'Age: %{customdata[3]}<br>' +
+                         'Position: %{customdata[4]}<br>' +
+                         'Gls/90: %{customdata[5]}<br>' +
+                         'Ast/90: %{customdata[6]}<br>' +
+                         'Archetype: %{customdata[7]}<extra></extra>',
+        )
+        
+        fig.update_layout(
+            template='plotly_dark',
+            hovermode='closest',
+            xaxis_title='Playing Style Axis 1 (← to →)',
+            yaxis_title='Playing Style Axis 2 (← to →)',
+            xaxis=dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(128, 128, 128, 0.2)',
+                zeroline=True,
+                zerolinewidth=1,
+                zerolinecolor='rgba(255, 255, 255, 0.3)',
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(128, 128, 128, 0.2)',
+                zeroline=True,
+                zerolinewidth=1,
+                zerolinecolor='rgba(255, 255, 255, 0.3)',
+            ),
+            plot_bgcolor='#1a1a1a',
+            paper_bgcolor='#1a1a1a',
+            font=dict(color='white'),
+            legend=dict(
+                yanchor='top',
+                y=0.99,
+                xanchor='right',
+                x=0.99,
+                bgcolor='rgba(0, 0, 0, 0.5)',
+                bordercolor='gray',
+                borderwidth=1,
+            ),
+        )
+        
+        return fig
+    
+    @staticmethod
+    def archetype_universe_filter(
+        df: pd.DataFrame,
+        selected_archetypes: Optional[List[str]] = None,
+        height: int = 700,
+        width: int = 1000,
+    ) -> go.Figure:
+        """
+        Create archetype universe with archetype filtering.
+        
+        Args:
+            df: Player DataFrame
+            selected_archetypes: List of archetype names to highlight (others grayed out)
+            height: Chart height
+            width: Chart width
+            
+        Returns:
+            Plotly Figure
+        """
+        plot_df = df.copy()
+        
+        # Add highlight column
+        if selected_archetypes:
+            plot_df['Highlight'] = plot_df['Archetype'].isin(selected_archetypes)
+        else:
+            plot_df['Highlight'] = True
+        
+        # Create color mapping
+        archetype_colors = {}
+        for archetype in plot_df['Archetype'].unique():
+            if archetype in ARCHETYPES:
+                archetype_colors[archetype] = ARCHETYPES[archetype].get('color', '#95A5A6')
+            else:
+                archetype_colors[archetype] = '#95A5A6'
+        
+        # Create figure
+        fig = go.Figure()
+        
+        # Add non-highlighted points (grayed out)
+        non_selected = plot_df[~plot_df['Highlight']]
+        if len(non_selected) > 0:
+            fig.add_trace(go.Scatter(
+                x=non_selected['PCA_X'],
+                y=non_selected['PCA_Y'],
+                mode='markers',
+                marker=dict(
+                    size=4,
+                    color='rgba(150, 150, 150, 0.2)',
+                    line=dict(width=0),
+                ),
+                hoverinfo='skip',
+                name='Other Archetypes',
+            ))
+        
+        # Add highlighted points by archetype
+        if selected_archetypes:
+            for archetype in selected_archetypes:
+                arch_df = plot_df[plot_df['Archetype'] == archetype]
+                if len(arch_df) > 0:
+                    fig.add_trace(go.Scatter(
+                        x=arch_df['PCA_X'],
+                        y=arch_df['PCA_Y'],
+                        mode='markers',
+                        name=archetype,
+                        marker=dict(
+                            size=7,
+                            color=archetype_colors.get(archetype, '#95A5A6'),
+                            opacity=0.8,
+                            line=dict(width=0.5, color='white'),
+                        ),
+                        hovertemplate='<b>%{customdata[0]}</b><br>' +
+                                     'Squad: %{customdata[1]}<br>' +
+                                     'League: %{customdata[2]}<br>' +
+                                     'Position: %{customdata[3]}<br>' +
+                                     'Archetype: ' + archetype + '<extra></extra>',
+                        customdata=arch_df[['Player', 'Squad', 'League', 'Primary_Pos']],
+                    ))
+        
+        fig.update_layout(
+            title='Archetype Universe: Filtered Player Distribution',
+            template='plotly_dark',
+            xaxis_title='Playing Style Axis 1',
+            yaxis_title='Playing Style Axis 2',
+            height=height,
+            width=width,
+            hovermode='closest',
+            plot_bgcolor='#1a1a1a',
+            paper_bgcolor='#1a1a1a',
+            font=dict(color='white'),
+            legend=dict(
+                yanchor='top',
+                y=0.99,
+                xanchor='right',
+                x=0.99,
+                bgcolor='rgba(0, 0, 0, 0.5)',
+                bordercolor='gray',
+                borderwidth=1,
+            ),
+        )
+        
+        return fig
+
 
 
 # Convenience functions
@@ -472,3 +692,52 @@ def create_archetype_pie(df, league='all'):
 def create_percentile_bars(percentiles):
     """Shortcut: Create percentile progress bars."""
     return PlotlyVisualizations.percentile_progress_bars(percentiles)
+
+def create_similarity_driver_chart(feature_attribution: Dict[str, float]) -> go.Figure:
+    """
+    Create horizontal bar chart showing similarity drivers between two players.
+    
+    Args:
+        feature_attribution: Dict of feature_name -> distance (0-1 scale)
+        
+    Returns:
+        Plotly Figure
+    """
+    features = list(feature_attribution.keys())
+    distances = list(feature_attribution.values())
+    
+    # Invert distances so that low distance (high similarity) shows as long bar
+    similarity_scores = [1 - d for d in distances]
+    
+    fig = go.Figure(data=[
+        go.Bar(
+            y=features,
+            x=similarity_scores,
+            orientation='h',
+            marker=dict(
+                color=similarity_scores,
+                colorscale='RdYlGn',
+                cmin=0,
+                cmax=1,
+                showscale=False,
+            ),
+            text=[f'{s:.0%}' for s in similarity_scores],
+            textposition='outside',
+            hovertemplate='<b>%{y}</b><br>Similarity: %{x:.0%}<extra></extra>',
+        )
+    ])
+    
+    fig.update_layout(
+        title='Similarity Driver Analysis (How Similar are They?)',
+        xaxis_title='Similarity Score',
+        yaxis_title='Feature',
+        height=400,
+        template='plotly_dark',
+        plot_bgcolor='#1a1a1a',
+        paper_bgcolor='#1a1a1a',
+        font=dict(color='white'),
+        xaxis=dict(range=[0, 1]),
+    )
+    
+    return fig
+

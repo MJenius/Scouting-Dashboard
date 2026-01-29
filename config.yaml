@@ -1,0 +1,139 @@
+# Football Scouting Dashboard Configuration
+# This file allows non-coders to adjust model parameters and behavior
+
+# ============================================================================
+# POSITION-SPECIFIC WEIGHT MATRIX
+# Adjusts the importance of different statistics for each position
+# Higher values = stronger influence on similarity matching
+# ============================================================================
+profile_weights:
+  attacker:
+    Gls/90: 3.0      # Goals per 90 (PRIMARY METRIC FOR FORWARDS)
+    Ast/90: 1.5      # Assists per 90
+    Sh/90: 2.5       # Shots per 90
+    SoT/90: 2.0      # Shots on target
+    Crs/90: 1.0      # Crosses
+    Int/90: 0.3      # Interceptions
+    TklW/90: 0.5     # Tackles won
+    Fls/90: 1.0      # Fouls committed
+    Fld/90: 1.0      # Fouls drawn
+
+  midfielder:
+    Gls/90: 0.5
+    Ast/90: 2.5      # PRIMARY METRIC FOR MIDFIELDERS
+    Sh/90: 0.8
+    SoT/90: 0.6
+    Crs/90: 2.0      # Crossing ability
+    Int/90: 1.5      # Ball recovery
+    TklW/90: 1.8     # Defensive contribution
+    Fls/90: 1.2
+    Fld/90: 1.2
+
+  defender:
+    Gls/90: 0.2
+    Ast/90: 0.3
+    Sh/90: 0.1
+    SoT/90: 0.1
+    Crs/90: 0.5
+    Int/90: 2.5      # PRIMARY METRIC FOR DEFENDERS
+    TklW/90: 2.5     # Defensive contribution
+    Fls/90: 1.5
+    Fld/90: 1.5
+
+  goalkeeper:
+    GA90: 2.5        # Goals against per 90 (LOWER IS BETTER)
+    Save%: 3.0       # PRIMARY METRIC FOR GOALKEEPERS
+    CS%: 2.0         # Clean sheet percentage
+    W: 1.5           # Wins
+    D: 1.0           # Draws
+    L: 0.5           # Losses (LOWER IS BETTER)
+    PKsv: 1.5        # Penalty saves
+    PKm: 1.0         # Penalty saves made
+    Saves: 1.0       # Total saves
+
+# ============================================================================
+# MARKET VALUE CALCULATION
+# Adjustable multipliers for transfer value estimation
+# ============================================================================
+market_value:
+  # Scout bias settings: choose between "Conservative", "Neutral", "Aggressive"
+  scout_bias: "Neutral"
+  
+  # Base value multipliers by age
+  age_multipliers:
+    "18-21": 0.8     # Young prospects (higher upside)
+    "22-24": 1.0     # Development phase
+    "25-28": 1.2     # Prime years (peak value)
+    "29-32": 0.95    # Experienced players
+    "33+": 0.6       # Veteran discount
+  
+  # League tier base values (£M)
+  league_base_values:
+    "Premier League": 5.0
+    "Championship": 2.5
+    "League One": 1.2
+    "League Two": 0.8
+    "National League": 0.4
+    "Bundesliga": 4.5
+    "La Liga": 5.0
+    "Serie A": 4.5
+    "Ligue 1": 4.0
+  
+  # Percentile tiers - scaling factor
+  percentile_multipliers:
+    elite: 2.5       # 90+ percentile
+    excellent: 2.0   # 80-89 percentile
+    very_good: 1.5   # 70-79 percentile
+    good: 1.0        # 50-69 percentile
+    below_average: 0.7  # <50 percentile
+
+# ============================================================================
+# SCOUTING CONFIDENCE SETTINGS
+# Configure how completeness scores are displayed
+# ============================================================================
+scouting_confidence:
+  elite_threshold: 90
+  elite_label: "Verified Elite Data"
+  
+  good_threshold: 70
+  good_label: "Good Scouting Data"
+  
+  directional_threshold: 40
+  directional_label: "Directional Data (Further Vetting Required)"
+  
+  poor_threshold: 0
+  poor_label: "Incomplete Data - Caution Advised"
+
+# ============================================================================
+# HIDDEN GEMS DISCOVERY SETTINGS
+# ============================================================================
+hidden_gems:
+  age_threshold: 23        # Maximum age for "young prospect"
+  percentile_threshold: 80 # Minimum percentile for high priority
+  exclude_league: "Premier League"  # Don't flag top-league players as hidden gems
+  min_games: 10            # Minimum 90s for statistical reliability
+
+# ============================================================================
+# CLUSTERING & ARCHETYPES
+# ============================================================================
+clustering:
+  n_clusters: 8            # Number of player archetypes
+  random_state: 42         # For reproducibility
+  pca_components: 2        # 2D visualization
+
+# ============================================================================
+# UI/UX SETTINGS
+# ============================================================================
+ui:
+  theme: "dark"
+  fuzzy_search_limit: 10   # Number of autocomplete suggestions
+  top_similar_players: 5   # Default number of similar players to show
+  leaderboard_size: 25     # Default leaderboard size
+
+# ============================================================================
+# DATA VALIDATION THRESHOLDS
+# ============================================================================
+data_validation:
+  min_minutes_played: 10   # Minimum 90s for statistical reliability
+  min_players_per_group: 5 # Minimum players in position-league group
+  data_completeness_warning: 30  # Warn if player has < 30% completeness

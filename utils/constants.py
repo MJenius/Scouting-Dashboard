@@ -359,3 +359,26 @@ TRANSFER_PRIORITY_TIERS = {
         'color': '#3498DB',
     },
 }
+
+# ============================================================================
+# METRIC TOOLTIPS & HELP TEXT
+# Displayed in UI to help scouts understand each statistic
+# ============================================================================
+METRIC_TOOLTIPS = {
+    'Gls/90': 'Goals scored per 90 minutes played. Key metric for forwards and attacking midfielders.',
+    'Ast/90': 'Assists per 90 minutes. Measures creative output and goal-creating ability.',
+    'Sh/90': 'Shots taken per 90 minutes. Indicates offensive involvement and risk-taking.',
+    'SoT/90': 'Shots on target per 90 minutes. Higher accuracy/quality shot selection.',
+    'Crs/90': 'Crosses delivered per 90 minutes. Critical for attacking players and set-piece specialists.',
+    'Int/90': 'Interceptions per 90 minutes. Shows defensive positioning and reading of the game.',
+    'TklW/90': 'Tackles won per 90 minutes. Direct tackle success. Lower than total tackles.',
+    'Fls/90': 'Fouls committed per 90 minutes. Discipline indicator—higher fouls suggests physical play.',
+    'Fld/90': 'Fouls drawn per 90 minutes. Shows dribbling ability and how opponents react.',
+    'GA90': 'Goals against per 90 minutes (Goalkeepers). Lower is better. Affected by defense quality.',
+    'Save%': 'Save percentage (Goalkeepers). Ratio of shots stopped to shots faced. Elite GKs: 70%+.',
+    'CS%': 'Clean sheet percentage (Goalkeepers). Percentage of matches with zero goals conceded.',
+    'Age': 'Player age. Peak performance typically 25-28 years old.',
+    '90s': 'Total 90-minute equivalents played in season. Higher = more data reliability.',
+    'Squad': 'Current club/team.',
+    'League': 'Top-level league (PL, Championship, Bundesliga, etc.).',
+}

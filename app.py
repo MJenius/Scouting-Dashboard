@@ -23,6 +23,7 @@ from utils import (
     PRIMARY_POSITIONS,
     ARCHETYPE_NAMES,
     LEAGUE_COLORS,
+    METRIC_TOOLTIPS,
     add_market_value_to_dataframe,
     generate_narrative_for_player,
 )
@@ -80,6 +81,7 @@ if 'page' not in st.session_state:
 # DATA LOADING (CACHED)
 # ============================================================================
 
+
 @st.cache_data
 def load_all_data():
     """Load and process all data once per session."""
@@ -87,20 +89,22 @@ def load_all_data():
     df = result['dataframe']
     scaled = result['scaled_features']
     scaler = result['scaler']
-    
     engine = SimilarityEngine(df, scaled, scaler)
+    return result, engine, df, scaled
+
+# Separate clustering resource
+@st.cache_resource
+def get_clustered_players(df, scaled):
     df_clustered, clusterer = cluster_players(df, scaled)
-    
-    # Add market value analysis
     df_clustered = add_market_value_to_dataframe(df_clustered)
-    
-    return result, engine, clusterer, df_clustered
+    return df_clustered, clusterer
 
 def ensure_data_loaded():
     """Ensure data is loaded into session state."""
     if not st.session_state.data_loaded:
         with st.spinner("🔄 Loading and processing data..."):
-            result, engine, clusterer, df_clustered = load_all_data()
+            result, engine, df, scaled = load_all_data()
+            df_clustered, clusterer = get_clustered_players(df, scaled)
             st.session_state.data_result = result
             st.session_state.engine = engine
             st.session_state.clusterer = clusterer
@@ -112,6 +116,15 @@ def ensure_data_loaded():
 # ============================================================================
 
 with st.sidebar:
+        st.subheader("Scout Bias Settings")
+        bias_options = ["Conservative", "Neutral", "Aggressive"]
+        selected_bias = st.selectbox(
+            "Market Value Bias:",
+            options=bias_options,
+            index=bias_options.index("Neutral"),
+            help="Adjusts the multiplier for market value estimation."
+        )
+        st.session_state['scout_bias'] = selected_bias
     st.title("⚙️ Filters & Settings")
     
     # Age filter
@@ -285,16 +298,29 @@ if st.session_state.page == '🔍 Player Search':
                 
                 st.divider()
                 
-                # Completeness score
+                # Completeness score with professional confidence labels
                 completeness = player_data['Completeness_Score']
-                if completeness >= 70:
-                    completeness_color = "🟢"
-                elif completeness >= 40:
-                    completeness_color = "🟡"
-                else:
-                    completeness_color = "🔴"
                 
-                st.write(f"**Data Completeness**: {completeness_color} {completeness:.0f}%")
+                # Determine confidence label and color
+                if completeness >= 90:
+                    confidence_label = "🟢 Verified Elite Data"
+                    confidence_desc = "Full scouting confidence - all key metrics available"
+                elif completeness >= 70:
+                    if suggestions:
+                        # Create selectbox from suggestions
+                        player_options = [s[0] for s in suggestions]
+                        selected_player = st.selectbox(
+                            "Select player:",
+                            options=player_options,
+                            key='selected_player'
+                        )
+            
+                        if selected_player:
+                with col1:
+                    st.write(f"**Scouting Confidence**: {confidence_label}")
+                    st.caption(f"_{confidence_desc}_ ({completeness:.0f}% complete)")
+                with col2:
+                    st.metric("Completeness", f"{completeness:.0f}%")
                 
                 # Market Value
                 if 'Estimated_Value_£M' in player_data.index:
@@ -314,6 +340,22 @@ if st.session_state.page == '🔍 Player Search':
                     try:
                         narrative = generate_narrative_for_player(player_data, include_value=True)
                         st.markdown(narrative)
+                        # PDF Export button
+                        from utils.pdf_export import export_scouting_pdf
+                        import tempfile
+                        import os
+                        if st.button("📄 Download Scouting Dossier (PDF)", key="download_pdf"):
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmpfile:
+                                export_scouting_pdf(player_data, narrative, tmpfile.name)
+                                tmpfile.flush()
+                                with open(tmpfile.name, "rb") as f:
+                                    st.download_button(
+                                        label="Download PDF",
+                                        data=f.read(),
+                                        file_name=f"{player_data.get('Player','player')}_scouting_dossier.pdf",
+                                        mime="application/pdf"
+                                    )
+                                os.unlink(tmpfile.name)
                     except Exception as e:
                         st.error(f"Could not generate narrative: {e}")
                 
@@ -387,6 +429,63 @@ if st.session_state.page == '🔍 Player Search':
                         use_container_width=True,
                         hide_index=True
                     )
+                    
+                    # NEW: Similarity Driver Analysis
+                    st.divider()
+                    st.subheader("🔍 Explainable Similarity - What Makes Them Similar?")
+                    
+                    # Show top match
+                    if len(similar) > 0:
+                        top_match_name = similar.iloc[0]['Player']
+                        top_match_score = similar.iloc[0]['Match_Score']
+                        
+                        col1, col2 = st.columns([2, 1])
+                        
+                        with col1:
+                            st.write(f"**Analyzing: {selected_player} vs {top_match_name}**")
+                        
+                        with col2:
+                            show_attribution = st.checkbox(
+                                "Show similarity breakdown",
+                                value=False,
+                                key='show_attribution'
+                            )
+                        
+                        if show_attribution:
+                            try:
+                                # Calculate feature attribution
+                                attribution = engine.calculate_feature_attribution(
+                                    selected_player,
+                                    top_match_name,
+                                    use_position_weights=use_weights
+                                )
+                                
+                                if attribution:
+                                    # Create visualization
+                                    from utils.visualizations import create_similarity_driver_chart
+                                    driver_fig = create_similarity_driver_chart(attribution)
+                                    st.plotly_chart(driver_fig, use_container_width=True)
+                                    
+                                    # Narrative explanation
+                                    most_similar_features = list(attribution.items())[:3]  # Top 3
+                                    most_different_features = list(attribution.items())[-2:]  # Bottom 2
+                                    
+                                    st.write("**Most Similar Aspects:**")
+                                    for feat, dist in most_similar_features:
+                                        similarity_pct = int((1 - dist) * 100)
+                                        st.write(f"• {feat}: {similarity_pct}% similar")
+                                    
+                                    st.write("**Key Differences:**")
+                                    for feat, dist in most_different_features:
+                                        similarity_pct = int((1 - dist) * 100)
+                                        st.write(f"• {feat}: {similarity_pct}% similar (Lower match here)")
+                                    
+                                    # Summary
+                                    st.write(f"**Overall Match**: {top_match_score:.1f}% - " +
+                                           "Strong profile alignment with key differences in " +
+                                           f"{most_different_features[0][0]}")
+                            except Exception as e:
+                                st.warning(f"Could not calculate similarity breakdown: {e}")
         else:
             st.info("No players found. Try a different search term.")
 
@@ -427,6 +526,23 @@ elif st.session_state.page == '⚔️ Head-to-Head':
             with col1:
                 st.metric(f"📍 {p1['name']}", f"{p1['league']} | {p1['position']}")
             with col2:
+                    else:
+                        st.info("No players found. Try a different search term.")
+                        # Trending Prospects: U21, 90+ percentile
+                        st.subheader("🔥 Trending Prospects (U21, 90+ percentile)")
+                        trending = df[(df['Age'] <= 21) & (df['Gls/90_pct'] >= 90)]
+                        if len(trending) == 0:
+                            trending = df[(df['Age'] <= 21)].sort_values('Gls/90_pct', ascending=False).head(5)
+                        else:
+                            trending = trending.sort_values('Gls/90_pct', ascending=False).head(5)
+                        if len(trending) > 0:
+                            st.dataframe(
+                                trending[['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'Gls/90_pct', 'Archetype']].reset_index(drop=True),
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                        else:
+                            st.write("No trending prospects found in the current dataset.")
                 st.metric("Age", f"{int(p1['age'])} vs {int(p2['age'])}")
             with col3:
                 st.metric(f"⚡ {p2['name']}", f"{p2['league']} | {p2['position']}")
@@ -502,24 +618,48 @@ elif st.session_state.page == '💎 Hidden Gems':
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            min_goals = st.slider("Min Goals/90:", 0.0, 2.0, 0.3, step=0.1, key='gems_goals')
+            min_goals = st.slider(
+                "Min Goals/90:",
+                0.0, 2.0, 0.3, step=0.1, key='gems_goals',
+                help=METRIC_TOOLTIPS.get('Gls/90', "Minimum goals per 90 minutes.")
+            )
         
         with col2:
-            min_assists = st.slider("Min Assists/90:", 0.0, 1.0, 0.1, step=0.05, key='gems_assists')
+            min_assists = st.slider(
+                "Min Assists/90:",
+                0.0, 1.0, 0.1, step=0.05, key='gems_assists',
+                help=METRIC_TOOLTIPS.get('Ast/90', "Minimum assists per 90 minutes.")
+            )
         
         with col3:
-            max_age = st.slider("Max Age:", 15, 30, 23, key='gems_age')
+            max_age = st.slider(
+                "Max Age:",
+                15, 30, 23, key='gems_age',
+                help="Maximum player age for hidden gems search."
+            )
         
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            min_percentile = st.slider("Min Percentile:", 0, 100, 75, step=5, key='gems_percentile')
+            min_percentile = st.slider(
+                "Min Percentile:",
+                0, 100, 75, step=5, key='gems_percentile',
+                help="Minimum percentile for goals/90 (relative to position/league)."
+            )
         
         with col2:
-            exclude_pl = st.checkbox("Exclude Premier League", value=True, key='gems_exclude_pl')
+            exclude_pl = st.checkbox(
+                "Exclude Premier League",
+                value=True, key='gems_exclude_pl',
+                help="Exclude Premier League players from hidden gems (focus on undervalued leagues)."
+            )
         
         with col3:
-            min_games = st.slider("Min 90s:", 0, 30, 10, key='gems_games')
+            min_games = st.slider(
+                "Min 90s:",
+                0, 30, 10, key='gems_games',
+                help=METRIC_TOOLTIPS.get('90s', "Minimum full matches played (90s) for reliability.")
+            )
         
         # Apply filters
         gems = df[
@@ -748,6 +888,73 @@ elif st.session_state.page == '🏆 Leaderboards':
         board_df,
         metric,
         league if league != 'all' else 'all',
+        height=500
+    )
+    st.plotly_chart(beeswarm, use_container_width=True)
+    
+    # NEW: Archetype Universe Tab
+    st.divider()
+    st.subheader("🌌 Archetype Universe - Player Style Map")
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        st.write("**Interactive 2D map of all players by their playing style (PCA projection).**")
+        st.write("Players close together have similar profiles. Colors represent different archetypes.")
+    
+    with col2:
+        universe_mode = st.radio(
+            "View mode:",
+            options=["All Players", "Filtered"],
+            horizontal=True,
+            key="universe_mode"
+        )
+    
+    if universe_mode == "All Players":
+        # Show all players in the universe
+        universe_fig = PlotlyVisualizations.archetype_universe(df_filtered)
+        st.plotly_chart(universe_fig, use_container_width=True)
+    else:
+        # Filtered view - let user select archetypes
+        st.write("**Select archetypes to highlight:**")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        archetype_list = df_filtered['Archetype'].unique().tolist()
+        selected_archs = []
+        
+        for idx, arch in enumerate(sorted(archetype_list)):
+            col_idx = idx % 4
+            with [col1, col2, col3, col4][col_idx]:
+                if st.checkbox(arch, value=False, key=f"arch_filter_{arch}"):
+                    selected_archs.append(arch)
+        
+        if selected_archs:
+            filtered_universe = PlotlyVisualizations.archetype_universe_filter(
+                df_filtered,
+                selected_archetypes=selected_archs
+            )
+            st.plotly_chart(filtered_universe, use_container_width=True)
+            
+            # Show stats for selected archetypes
+            st.divider()
+            st.subheader(f"📊 Statistics - {', '.join(selected_archs)}")
+            
+            selected_df = df_filtered[df_filtered['Archetype'].isin(selected_archs)]
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Players", len(selected_df))
+            with col2:
+                st.metric("Avg Age", f"{selected_df['Age'].mean():.1f}")
+            with col3:
+                st.metric("Avg Goals/90", f"{selected_df['Gls/90'].mean():.2f}")
+            with col4:
+                st.metric("Avg Assists/90", f"{selected_df['Ast/90'].mean():.2f}")
+        else:
+            st.info("Select one or more archetypes above to view filtered universe")
+
         height=500
     )
     st.plotly_chart(beeswarm, use_container_width=True)

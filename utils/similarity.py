@@ -412,6 +412,83 @@ class SimilarityEngine:
         
         return features * weights
     
+    def calculate_feature_attribution(
+        self,
+        target_player: str,
+        comparison_player: str,
+        use_position_weights: bool = False,
+    ) -> Optional[Dict[str, float]]:
+        """
+        Calculate which features drive the similarity between two players.
+        
+        Returns feature-level distances after weighting, showing which stats
+        are most similar vs different. Lower distance = more similar.
+        
+        Args:
+            target_player: First player name
+            comparison_player: Second player name
+            use_position_weights: Apply position-specific weighting
+            
+        Returns:
+            Dict of feature_name -> distance (0-1 scale), ordered by importance,
+            or None if players not found
+        """
+        idx1 = self._find_player_index(target_player)
+        idx2 = self._find_player_index(comparison_player)
+        
+        if idx1 is None or idx2 is None:
+            return None
+        
+        row1 = self.df.loc[idx1]
+        row2 = self.df.loc[idx2]
+        
+        # Get vectors
+        row1_idx = self.df.index.get_loc(idx1)
+        row2_idx = self.df.index.get_loc(idx2)
+        
+        vec1 = self.scaled_features[row1_idx].copy()
+        vec2 = self.scaled_features[row2_idx].copy()
+        
+        # Apply weighting if needed
+        weights = np.ones(len(FEATURE_COLUMNS))
+        if use_position_weights:
+            pos1 = row1['Primary_Pos']
+            profile_map = {
+                'FW': ProfileType.ATTACKER,
+                'MF': ProfileType.MIDFIELDER,
+                'DF': ProfileType.DEFENDER,
+                'GK': ProfileType.GOALKEEPER,
+            }
+            profile1 = profile_map.get(pos1, ProfileType.MIDFIELDER)
+            
+            if profile1 != ProfileType.GOALKEEPER:
+                weights_dict = PROFILE_WEIGHTS[profile1.value]
+                weights = np.array([weights_dict[col] for col in FEATURE_COLUMNS])
+                weights = weights / weights.mean()
+        
+        # Calculate feature-level distances (absolute differences)
+        feature_distances = np.abs(vec1 - vec2)
+        
+        # Weight the distances
+        weighted_distances = feature_distances * weights
+        
+        # Normalize to 0-1 scale
+        max_distance = weighted_distances.max()
+        if max_distance > 0:
+            normalized_distances = weighted_distances / max_distance
+        else:
+            normalized_distances = weighted_distances
+        
+        # Build result dict, sorted by distance (most similar first)
+        attribution = {}
+        for i, feat in enumerate(FEATURE_COLUMNS):
+            attribution[feat] = float(normalized_distances[i])
+        
+        # Sort by distance (ascending = more similar features first)
+        attribution = dict(sorted(attribution.items(), key=lambda x: x[1]))
+        
+        return attribution
+    
     def find_similar_players(
         self,
         target_player: str,

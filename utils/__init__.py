@@ -14,6 +14,7 @@ from .constants import (
     PRIMARY_POSITIONS,
     ARCHETYPE_NAMES,
     PROFILE_WEIGHTS,
+    METRIC_TOOLTIPS,
 )
 
 from .data_engine import (
@@ -52,6 +53,11 @@ from .market_value import (
     add_market_value_to_dataframe,
 )
 
+from .config_loader import (
+    ConfigLoader,
+    get_config,
+)
+
 __all__ = [
     # Constants
     'FEATURE_COLUMNS',
@@ -62,6 +68,7 @@ __all__ = [
     'PRIMARY_POSITIONS',
     'ARCHETYPE_NAMES',
     'PROFILE_WEIGHTS',
+    'METRIC_TOOLTIPS',
     # Data Engine
     'load_data',
     'process_all_data',
@@ -88,4 +95,7 @@ __all__ = [
     'MarketValueEstimator',
     'PricePerformanceAnalyzer',
     'add_market_value_to_dataframe',
+    # Config
+    'ConfigLoader',
+    'get_config',
 ]
