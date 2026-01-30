@@ -200,6 +200,12 @@ with st.sidebar:
             st.metric("Avg Age", f"{filtered['Age'].mean():.1f}")
             st.metric("Avg Goals/90", f"{filtered['Gls/90'].mean():.2f}")
 
+    st.divider()
+    if st.button("🔄 Reset Cache & Reload Data", use_container_width=True):
+        st.cache_data.clear()
+        st.session_state.data_loaded = False
+        st.rerun()
+
 # ============================================================================
 # MAIN APP
 # ============================================================================
@@ -285,8 +291,13 @@ if st.session_state.page == '🔍 Player Search':
             )
             
             if selected_player:
-                # Get player data
-                player_data = df[df['Player'] == selected_player].iloc[0]
+                # Get player data using the expanded index lookup
+                idx = engine._find_player_index(selected_player)
+                if idx is not None:
+                    player_data = df.loc[idx]
+                else:
+                    st.error("Could not find selected player data.")
+                    st.stop()
                 
                 # Player card
                 col1, col2, col3, col4, col5 = st.columns(5)
@@ -621,9 +632,19 @@ if st.session_state.page == '🔍 Player Search':
                     
                     # Only include columns that exist in the data
                     display_cols = [col for col in display_cols if col in similar.columns]
+                    if 'Primary_Driver' in similar.columns:
+                        display_cols.insert(4, 'Primary_Driver')
                     
-                    # NEW: Add similarity driver for each player
-                    st.write("**Top 5 Similar Players** (with primary similarity drivers)")
+                    # Show as table for quick scanning
+                    st.write("**Similarity Results Table**")
+                    st.dataframe(
+                        similar[display_cols].head(5),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                    # Detailed cards
+                    st.write("**Detailed Match Breakdown**")
                     
                     for idx, (_, row) in enumerate(similar.head(5).iterrows(), 1):
                         match_player = row['Player']
@@ -667,7 +688,9 @@ if st.session_state.page == '🔍 Player Search':
                                     if 'Ast/90' in row.index:
                                         stat_cols[1].metric("Ast/90", f"{row['Ast/90']:.2f}")
                                     if 'Age' in row.index:
-                                        stat_cols[2].metric("Age", int(row['Age']))
+                                        age_val = row['Age']
+                                        age_display = int(age_val) if not pd.isna(age_val) else "??"
+                                        stat_cols[2].metric("Age", age_display)
                                     
                                     # Show similarity breakdown
                                     st.write("**Similarity Breakdown (Target's Key Strengths):**")
@@ -829,16 +852,20 @@ elif st.session_state.page == '⚔️ Head-to-Head':
     col1, col2 = st.columns(2)
     
     with col1:
+        # Create unique display names for the selectbox
+        player_options = [f"{row['Player']} ({row['Squad']})" for _, row in df.iterrows()]
+        player_options = sorted(list(set(player_options)))  # Unique and sorted
+
         player1 = st.selectbox(
             "Select first player:",
-            options=df['Player'].unique(),
+            options=player_options,
             key='player1_select'
         )
     
     with col2:
         player2 = st.selectbox(
             "Select second player:",
-            options=df['Player'].unique(),
+            options=player_options,
             key='player2_select'
         )
     
@@ -856,7 +883,11 @@ elif st.session_state.page == '⚔️ Head-to-Head':
             with col1:
                 st.metric(f"📍 {p1['name']}", f"{p1['league']} | {p1['position']}")
             with col2:
-                st.metric("Age", f"{int(p1['age'])} vs {int(p2['age'])}")
+                p1_age = p1['age']
+                p2_age = p2['age']
+                p1_age_display = int(p1_age) if not pd.isna(p1_age) else "??"
+                p2_age_display = int(p2_age) if not pd.isna(p2_age) else "??"
+                st.metric("Age", f"{p1_age_display} vs {p2_age_display}")
             with col3:
                 st.metric(f"⚡ {p2['name']}", f"{p2['league']} | {p2['position']}")
             with col4:
@@ -1215,25 +1246,38 @@ elif st.session_state.page == '🏆 Leaderboards':
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        from utils.constants import FEATURE_COLUMNS
-        metric = st.selectbox(
-            "Select metric:",
-            options=FEATURE_COLUMNS,
-            key='leaderboard_metric'
+        position_filter = st.selectbox(
+            "Filter by position:",
+            options=['all'] + PRIMARY_POSITIONS,
+            key='leaderboard_position'
         )
-    
+        # Note: We need to re-run if position changes to update metric list
+        if 'prev_pos' not in st.session_state:
+            st.session_state.prev_pos = position_filter
+        if st.session_state.prev_pos != position_filter:
+            st.session_state.prev_pos = position_filter
+            st.rerun()
+
     with col2:
         league = st.selectbox(
             "Select league:",
             options=['all'] + LEAGUES,
             key='leaderboard_league'
         )
-    
+        
     with col3:
-        position_filter = st.selectbox(
-            "Filter by position:",
-            options=['all'] + PRIMARY_POSITIONS,
-            key='leaderboard_position'
+        from utils.constants import FEATURE_COLUMNS, GK_FEATURE_COLUMNS
+        # Dynamically switch options based on position filter
+        if position_filter == 'GK':
+            metric_options = GK_FEATURE_COLUMNS
+        else:
+            metric_options = FEATURE_COLUMNS
+            
+        metric = st.selectbox(
+            "Select metric:",
+            options=metric_options,
+            index=0,
+            key='leaderboard_metric'
         )
     
     # Apply filters
@@ -1395,9 +1439,29 @@ elif st.session_state.page == '🏆 Leaderboards':
     
     with tab4:
         # Tactical Style Map (Archetype Universe)
-        st.write("**Tactical Hybrids**: Players positioned between archetypes represent hybrid playing styles")
+        st.write("**Tactical Galaxy**: Players positioned by stylistic similarity via PCA (Principal Component Analysis)")
+        st.caption("Each dot is a player. Proximity = Stylistic Similarity. Color = Assigned Archetype.")
         
-        # Filter options for the universe map
+        # Filter by archetype
+        selected_universe_archs = st.multiselect(
+            "Filter by Archetype:",
+            options=ARCHETYPE_NAMES,
+            default=ARCHETYPE_NAMES[:4], # Show some by default to avoid clutter
+            key='universe_arch_filter'
+        )
+        
+        # Universe visualization
+        universe_fig = PlotlyVisualizations.archetype_universe_filter(
+            st.session_state.df_clustered,
+            selected_archetypes=selected_universe_archs,
+            height=700
+        )
+        
+        st.plotly_chart(universe_fig, use_container_width=True)
+        
+        st.info("🔍 **How to read this**: The axes represent the primary stylistic variances in the dataset. "
+                "Forward-thinking players tend to cluster on one side, while defensive stalwarts occupy the other. "
+                "Hybrid players appeared in the 'gravity' between defined archetypes.")
         col1, col2 = st.columns([2, 1])
         
         with col1:

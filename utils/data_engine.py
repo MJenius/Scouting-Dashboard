@@ -31,11 +31,22 @@ from .constants import (
     PERCENTILE_QUALITY_THRESHOLDS,
     LOW_DATA_LEAGUES,
 )
+import unicodedata
+from rapidfuzz import process, fuzz
 
+
+def normalize_name(name: any) -> str:
+    """
+    Lowercase and remove accents/quotes/extra spaces for matching.
+    """
+    if pd.isna(name):
+        return ""
+    name = str(name).replace('"', '').replace("'", "").strip().lower()
+    return unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode('ascii')
 
 def clean_player_name(name: any) -> str:
     """
-    Remove quotes, extra spaces, and handle NaN for merging consistency.
+    Preserve display name but remove quotes.
     """
     if pd.isna(name):
         return ""
@@ -76,10 +87,10 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
     # Load and merge advanced files
     advanced_files = {
         'Premier League': 'data/Premier League Advanced Stats.csv',
-        'Bundesliga': 'data/Bundesliga Advanced Stats.csv',
+        'Bundesliga': 'data/Serie A Advanced Stats.csv', # Fixed swap
         'La Liga': 'data/La Liga Advanced Stats.csv',
-        'Serie A': 'data/Serie A Advanced Stats.csv',
-        'Ligue 1': 'data/Ligue Un Advanced Stats.csv' # Corrected name
+        'Serie A': 'data/Bundesliga Advanced Stats.csv', # Fixed swap
+        'Ligue 1': 'data/Ligue Un Advanced Stats.csv'
     }
 
     for league, adv_path in advanced_files.items():
@@ -112,27 +123,71 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
                 print(f"⚠️  Could not find 'Player' column in {adv_path}. Skipping.")
                 continue
 
-            # Clean player names for consistent merging
-            adv_df['Player'] = adv_df['Player'].apply(clean_player_name)
+            # Prepare for merge with lowercase keys
+            adv_df['MergeKey_Player'] = adv_df['Player'].apply(normalize_name)
+            if 'Squad' in adv_df.columns:
+                adv_df['MergeKey_Squad'] = adv_df['Squad'].apply(normalize_name)
             
             # Identify players from this league in the main dataframe
             league_mask = df['League'] == league
             league_players = df[league_mask].copy()
+            league_players['MergeKey_Player'] = league_players['Player'].apply(normalize_name)
+            league_players['MergeKey_Squad'] = league_players['Squad'].apply(normalize_name)
             
-            # Sub-select only needed columns
-            merge_cols = ['Player'] + [c for c in advanced_metrics if c in adv_df.columns]
-            adv_subset = adv_df[merge_cols].drop_duplicates(subset=['Player'])
+            # Normalize squad names in master
+            squad_fixes = {
+                'rb leipzig': 'rasenballsport leipzig',
+                'paris saint-germain': 'paris saint germain',
+                'inter': 'inter milan',
+                'milan': 'ac milan',
+                'leverkusen': 'bayer leverkusen',
+                'gladbach': 'borussia monchengladbach',
+                'real madrid': 'real madrid',
+                'manchester city': 'manchester city',
+                'bayern munich': 'bayern munich',
+                'athletic club': 'athletic bilbao',
+                'manchester utd': 'manchester united',
+                'nott\'m forest': 'nottingham forest',
+                'wolves': 'wolverhampton wanderers',
+                'west ham united': 'west ham',
+                'tottenham hotspur': 'tottenham',
+                'leicester city': 'leicester',
+                'ipswich town': 'ipswich',
+                'newcastle utd': 'newcastle united'
+            }
+            league_players['MergeKey_Squad'] = league_players['MergeKey_Squad'].replace(squad_fixes)
             
-            # Remove existing advanced columns from league_players to avoid suffixes
+            # Sub-select advanced data
+            merge_cols_adv = ['MergeKey_Player', 'MergeKey_Squad'] + [c for c in advanced_metrics if c in adv_df.columns]
+            adv_subset = adv_df[merge_cols_adv].drop_duplicates(subset=['MergeKey_Player', 'MergeKey_Squad'])
+            
+            # Remove existing advanced columns from league_players
             league_players = league_players.drop(columns=[c for c in advanced_metrics if c in league_players.columns], errors='ignore')
             
-            # Merge
-            merged = pd.merge(league_players, adv_subset, on='Player', how='left')
+            # Merge on keys
+            merged = pd.merge(league_players, adv_subset, on=['MergeKey_Player', 'MergeKey_Squad'], how='left')
             
-            # Fill missing values with 0
+            # Fuzzy fallback
+            unmatched_mask = merged['xG90'].isna() | (merged['xG90'] == 0)
+            if unmatched_mask.any():
+                idx_to_update = merged[unmatched_mask].index
+                for idx in idx_to_update:
+                    row = merged.loc[idx]
+                    squad_key = row['MergeKey_Squad']
+                    candidates = adv_subset[adv_subset['MergeKey_Squad'] == squad_key]
+                    if not candidates.empty:
+                        best = process.extractOne(row['MergeKey_Player'], candidates['MergeKey_Player'], scorer=fuzz.token_sort_ratio)
+                        if best and best[1] >= 75:
+                            match_data = candidates[candidates['MergeKey_Player'] == best[0]].iloc[0]
+                            for col in advanced_metrics:
+                                if col in match_data:
+                                    merged.at[idx, col] = match_data[col]
+
+            # Cleanup
+            merged = merged.drop(columns=['MergeKey_Player', 'MergeKey_Squad'], errors='ignore')
             for col in advanced_metrics:
                 if col in merged.columns:
-                    merged[col] = merged[col].fillna(0.0)
+                    merged[col] = pd.to_numeric(merged[col], errors='coerce').fillna(0.0)
                 else:
                     merged[col] = 0.0
             
@@ -318,19 +373,19 @@ def calculate_position_percentiles(df: pd.DataFrame) -> pd.DataFrame:
                 quality = 'Low'
             
             # Calculate percentile for each feature within group
-            for feature in FEATURE_COLUMNS:
-                pct_col = f'{feature}_pct'
-                quality_col = f'{feature}_pct_quality'
-                
-                # Rank within group: converts to 0-100 percentile
-                # na_option='bottom' places NaN values at 0th percentile
-                df.loc[mask, pct_col] = (
-                    df.loc[mask, feature].rank(pct=True, na_option='bottom') * 100
-                )
-                df.loc[mask, quality_col] = quality
+            # Outfield players: Use FEATURE_COLUMNS
+            if pos != 'GK':
+                for feature in FEATURE_COLUMNS:
+                    pct_col = f'{feature}_pct'
+                    quality_col = f'{feature}_pct_quality'
+                    
+                    df.loc[mask, pct_col] = (
+                        df.loc[mask, feature].rank(pct=True, na_option='bottom') * 100
+                    )
+                    df.loc[mask, quality_col] = quality
             
-            # Also calculate percentiles for goalkeeper-specific metrics
-            if pos == 'GK':
+            # Goalkeepers: Use GK_FEATURE_COLUMNS
+            else:
                 for feature in GK_FEATURE_COLUMNS:
                     # Skip if column doesn't exist
                     if feature not in df.columns:
@@ -339,8 +394,7 @@ def calculate_position_percentiles(df: pd.DataFrame) -> pd.DataFrame:
                     pct_col = f'{feature}_pct'
                     quality_col = f'{feature}_pct_quality'
                     
-                    # For goalkeeper metrics, we need to handle direction properly
-                    # Lower is better for GA90 and L (losses), higher is better for others
+                    # For goalkeeper metrics, handle direction properly
                     if feature in ['GA90', 'L']:
                         # Lower is better - invert the ranking
                         df.loc[mask, pct_col] = (

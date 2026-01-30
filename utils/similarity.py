@@ -291,31 +291,49 @@ class SimilarityEngine:
     
     def _find_player_index(self, player_name: str) -> Optional[int]:
         """
-        Find player by exact match or fuzzy matching.
-        
-        Strategy:
-        1. Try exact substring match (case-insensitive)
-        2. Fall back to fuzzy match (rapidfuzz) with threshold
-        3. Return None if not found
-        
-        Args:
-            player_name: Player name to search for
-            
-        Returns:
-            Player dataframe index, or None if not found
+        Find player by exact match, descriptive match (Name (Squad)), or fuzzy matching.
         """
-        # Exact substring match first (faster)
-        exact = self.df[
+        if not player_name:
+            return None
+
+        # 1. Descriptive match "Name (Squad)" - handles ambiguity perfectly
+        if " (" in player_name and player_name.endswith(")"):
+            try:
+                name_part = player_name.split(" (")[0].strip()
+                squad_part = player_name.split(" (")[1].replace(")", "").strip()
+                match = self.df[
+                    (self.df['Player'].str.casefold() == name_part.casefold()) &
+                    (self.df['Squad'].str.casefold() == squad_part.casefold())
+                ]
+                if not match.empty:
+                    return match.index[0]
+            except:
+                pass
+
+        # 2. Exact match (case-insensitive)
+        exact_match = self.df[self.df['Player'].str.casefold() == player_name.casefold()]
+        if len(exact_match) > 0:
+            return exact_match.index[0]
+
+        # 3. Exact substring match (case-insensitive)
+        substring = self.df[
             self.df['Player'].str.contains(player_name, case=False, na=False)
         ]
-        if len(exact) > 0:
-            return exact.index[0]
+        if len(substring) > 0:
+            # Prioritize matches that START with the string or are shorter/more exact
+            substring = substring.assign(
+                len=substring['Player'].str.len(),
+                starts=substring['Player'].str.lower().str.startswith(player_name.lower())
+            ).sort_values(['starts', 'len'], ascending=[False, True])
+            return substring.index[0]
         
-        # Fuzzy matching fallback
+        # 4. Fuzzy matching fallback
         best_match = None
         best_score = 0
         
-        for idx, player in self.df['Player'].items():
+        # Only fuzzy match against a subset for performance if large
+        search_space = self.df.head(1000) if len(self.df) > 2000 else self.df
+        for idx, player in search_space['Player'].items():
             if pd.isna(player):
                 continue
             score = fuzz.ratio(player_name.lower(), player.lower())
@@ -332,69 +350,96 @@ class SimilarityEngine:
         limit: int = 10,
     ) -> List[Tuple[str, int]]:
         """
-        Generate autocomplete suggestions for player names.
-        
-        Uses fuzzy matching to rank suggestions by match quality.
-        
-        Args:
-            input_text: Partial player name (e.g., "Haal")
-            league: Filter by league ('all' for all leagues)
-            limit: Maximum suggestions to return
-            
-        Returns:
-            List of (player_name, match_score) tuples sorted by score (descending)
+        Generate autocomplete suggestions using "Player (Squad)" format for clarity.
         """
-        # Get candidates
+        if not input_text:
+            return []
+
+        # Filter by league
         if league.lower() != 'all':
-            if league not in LEAGUES:
-                return []
-            candidates = self.df[self.df['League'] == league]['Player'].unique()
+            mask = self.df['League'] == league
+            candidates = self.df[mask]
         else:
-            candidates = self.df['Player'].unique()
+            candidates = self.df
         
-        # Score and sort
-        suggestions = []
-        for player in candidates:
-            if pd.isna(player):
-                continue
-            score = fuzz.ratio(input_text.lower(), player.lower())
-            if score > 0:
-                suggestions.append((player, score))
+        # We want to search in both Name and Squad
+        results = []
+        for idx, row in candidates.iterrows():
+            name = row['Player']
+            squad = row['Squad']
+            if pd.isna(name): continue
+            
+            # Use token_set_ratio for better substring matching in names
+            score = fuzz.token_set_ratio(input_text.lower(), name.lower())
+            
+            # Bonus for starting with the input
+            if name.lower().startswith(input_text.lower()):
+                score += 20
+                
+            if score >= 60: # Threshold for suggestions
+                results.append((f"{name} ({squad})", score))
         
-        suggestions.sort(key=lambda x: x[1], reverse=True)
-        return suggestions[:limit]
+        # Sort and limit
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:limit]
     
     def apply_position_weighting(
         self,
         features: np.ndarray,
         profile: ProfileType,
         target_indices: Optional[List[int]] = None,
-        custom_weights: Optional[np.ndarray] = None,
+        custom_weights: Optional[np.ndarray] = None
     ) -> np.ndarray:
         """
-        Apply position-specific weights and dynamic strength-based weighting.
+        Applies importance weighting to feature vectors based on position.
         """
-        if profile == ProfileType.GOALKEEPER:
-            return features
+        # Determine vector sections
+        outfield_len = len(FEATURE_COLUMNS)
+        gk_len = len(GK_FEATURE_COLUMNS)
+        total_len = outfield_len + gk_len
+        
+        # Handle full 22-length vector from the combined matrix
+        is_full_vector = features.shape[1] == total_len
         
         if custom_weights is not None:
             # Use provided custom weights (normalized)
             weights = custom_weights / custom_weights.mean()
             return features * weights
+            
+        # Select correct feature set for weighting defaults
+        is_gk = profile == ProfileType.GOALKEEPER
+        feature_set = GK_FEATURE_COLUMNS if is_gk else FEATURE_COLUMNS
         
         # Default position weights
         weights_dict = PROFILE_WEIGHTS[profile.value]
-        weights = np.array([weights_dict.get(col, 1.0) for col in FEATURE_COLUMNS])
+        base_weights = np.array([weights_dict.get(col, 1.0) for col in feature_set])
         
         # Apply strength-based bias if target_indices provided
         if target_indices:
             for idx in target_indices:
-                weights[idx] *= 3.0 # Triple weight for strengths
+                if idx < len(base_weights):
+                    base_weights[idx] *= 3.0 # Triple weight for strengths
         
-        # Normalize weights
-        weights = weights / weights.mean()
+        # Create final weight vector matching input shape
+        if is_full_vector:
+            final_weights = np.ones(total_len)
+            if is_gk:
+                final_weights[outfield_len:] = base_weights
+            else:
+                final_weights[:outfield_len] = base_weights
+        else:
+            final_weights = base_weights
+            
+        # Normalize weights (only the active part to keep scale consistent)
+        active_part = final_weights[outfield_len:] if (is_full_vector and is_gk) else \
+                      final_weights[:outfield_len] if (is_full_vector and not is_gk) else \
+                      final_weights
         
-        return features * weights
+        # Avoid division by zero
+        active_mean = active_part.mean() if active_part.mean() != 0 else 1.0
+        final_weights = final_weights / active_mean
+        
+        return features * final_weights
     
     def calculate_feature_attribution(
         self,
@@ -521,6 +566,8 @@ class SimilarityEngine:
         target_tracked = set(LEAGUE_METRIC_MAP.get(target_league, CORE_9))
         
         final_similarities = []
+        primary_drivers = []
+        
         for i, (idx, row) in enumerate(search_df.iterrows()):
             comp_league = row['League']
             comp_tracked = set(LEAGUE_METRIC_MAP.get(comp_league, CORE_9))
@@ -529,12 +576,20 @@ class SimilarityEngine:
             shared_indices = [j for j, f in enumerate(features_subset) if f in shared]
             
             if not shared_indices:
-                final_similarities.append(0); continue
+                final_similarities.append(0)
+                primary_drivers.append("N/A")
+                continue
                 
             v1 = target_vector[shared_indices].reshape(1, -1)
             v2 = search_feat_matrix[i, shared_indices].reshape(1, -1)
             
             sim = cosine_similarity(v1, v2)[0][0]
+            
+            # Find Primary Match Driver (feature with smallest weighted distance)
+            diffs = np.abs(v1 - v2).flatten()
+            best_feat_idx = np.argmin(diffs)
+            best_feat_name = [features_subset[j] for j in shared_indices][best_feat_idx]
+            primary_drivers.append(RADAR_LABELS.get(best_feat_name, best_feat_name))
             
             # Aggressive Coverage Penalty
             # This ensures top-flight players rarely match lower-league players 
@@ -547,6 +602,7 @@ class SimilarityEngine:
             final_similarities.append(sim)
         
         search_df['Match_Score'] = np.array(final_similarities) * 100
+        search_df['Primary_Driver'] = primary_drivers
         results = search_df[search_df.index != target_idx].sort_values('Match_Score', ascending=False)
         return results.head(top_n)
     
