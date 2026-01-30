@@ -29,6 +29,7 @@ from .constants import (
     MIN_MINUTES_PLAYED,
     MIN_PLAYERS_PER_GROUP,
     PERCENTILE_QUALITY_THRESHOLDS,
+    LOW_DATA_LEAGUES,
 )
 
 
@@ -155,8 +156,8 @@ def validate_data(df: pd.DataFrame) -> Dict[str, any]:
             'avg_age': league_df['Age'].mean(),
         }
         
-        # Check for missing defensive data (National League)
-        if league == 'National League':
+        # Check for missing defensive data (Low Data Leagues)
+        if league in LOW_DATA_LEAGUES:
             defensive_metrics = ['Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90']
             null_counts = {
                 metric: league_df[metric].isna().sum() 
@@ -164,7 +165,7 @@ def validate_data(df: pd.DataFrame) -> Dict[str, any]:
             }
             stats['null_defensive_stats'] = null_counts
             validation_report['warnings'].append(
-                f"⚠️  National League: Defensive stats mostly unavailable (as expected)"
+                f"⚠️  {league}: Defensive stats may be unavailable in this data tier (as expected)"
             )
         
         validation_report['league_stats'][league] = stats

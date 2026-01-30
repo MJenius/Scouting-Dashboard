@@ -110,6 +110,9 @@ LEAGUE_METRIC_MAP = {
     'Ligue 1': FEATURE_COLUMNS,                  # All 9 metrics
 }
 
+# Leagues with limited data tracking (e.g. only goals/assists)
+LOW_DATA_LEAGUES = ['National League']
+
 # Detailed explanation of data availability per league
 LEAGUE_DATA_QUALITY = {
     'Premier League': {

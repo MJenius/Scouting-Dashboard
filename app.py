@@ -28,6 +28,8 @@ from utils import (
     ARCHETYPE_NAMES,
     LEAGUE_COLORS,
     METRIC_TOOLTIPS,
+    LOW_DATA_LEAGUES,
+    HIDDEN_GEMS_EXCLUDE_LEAGUE,
     add_market_value_to_dataframe,
     generate_narrative_for_player,
 )
@@ -224,7 +226,7 @@ df_filtered = apply_filters(df)
 
 # Header
 st.title("⚽ Football Scouting Dashboard")
-st.caption(f"English Football Pyramid (PL → National League) | {len(df_filtered):,} players after filters")
+st.caption(f"Multi-League Global Scouting Dashboard | {len(df_filtered):,} players after filters")
 
 # Page selection
 col1, col2, col3, col4 = st.columns(4)
@@ -306,17 +308,17 @@ if st.session_state.page == '🔍 Player Search':
                 completeness = player_data['Completeness_Score']
                 player_league = player_data['League']
                 
-                # Special handling for National League players (capped at 33% by design)
-                if player_league == 'National League':
-                    st.write("**📋 Data Availability**: 🔵 Limited Data Tier (National League)")
+                # Special handling for limited data leagues (capped at 33% by design)
+                if player_league in LOW_DATA_LEAGUES:
+                    st.write(f"**📋 Data Availability**: 🔵 Limited Data Tier ({player_league})")
                     st.caption(
-                        "_National League players have limited statistical coverage in our dataset. "
+                        f"_{player_league} players have limited statistical coverage in our dataset. "
                         "This does not reflect player quality—further manual scouting recommended._"
                     )
                     col1, col2 = st.columns([2, 1])
                     with col1:
                         st.info(
-                            "⚠️ **Scouting Note**: National League data is capped at 33% completeness by design. "
+                            f"⚠️ **Scouting Note**: {player_league} data is capped at 33% completeness by design. "
                             "Use this profile for directional insights only."
                         )
                     with col2:
@@ -1436,4 +1438,4 @@ elif st.session_state.page == '🏆 Leaderboards':
 # ============================================================================
 
 st.divider()
-st.caption("⚽ Football Scouting Dashboard | Data: English Football Pyramid 2024-2025 | Built with Streamlit")
+st.caption("⚽ Football Scouting Dashboard | Global League Coverage 2024-2025 | Built with Streamlit")

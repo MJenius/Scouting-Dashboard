@@ -15,6 +15,8 @@ from .constants import (
     ARCHETYPE_NAMES,
     PROFILE_WEIGHTS,
     METRIC_TOOLTIPS,
+    LOW_DATA_LEAGUES,
+    HIDDEN_GEMS_EXCLUDE_LEAGUE,
 )
 
 from .data_engine import (
@@ -76,6 +78,8 @@ __all__ = [
     'ARCHETYPE_NAMES',
     'PROFILE_WEIGHTS',
     'METRIC_TOOLTIPS',
+    'LOW_DATA_LEAGUES',
+    'HIDDEN_GEMS_EXCLUDE_LEAGUE',
     # Data Engine
     'load_data',
     'process_all_data',

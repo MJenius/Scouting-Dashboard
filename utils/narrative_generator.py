@@ -285,14 +285,32 @@ class ScoutNarrativeGenerator:
     
     def _get_league_context(self, league: str, tier: int) -> str:
         """Generate contextual description of league level."""
-        contexts = {
-            1: "Competing at the highest level of English football provides exceptional defensive organization and tactical discipline.",
-            2: "The Championship is a demanding second tier known for its intensity and physicality, ideal for player development.",
-            3: "League One offers competitive third-tier football where consistent performers can showcase progression potential.",
-            4: "Playing in League Two demonstrates ability against semi-professional competition with room for advancement.",
-            5: "The National League represents fifth-tier football with limited defensive statistics available.",
+        # League-specific overrides
+        league_specific = {
+            'Premier League': "Competing at the highest level of English football provides exceptional defensive organization and tactical discipline.",
+            'Championship': "The Championship is a demanding second tier known for its intensity and physicality, ideal for player development.",
+            'League One': "League One offers competitive third-tier football where consistent performers can showcase progression potential.",
+            'League Two': "Playing in League Two demonstrates ability against professional competition with room for advancement.",
+            'National League': "The National League represents fifth-tier football with limited defensive statistics available.",
+            'Bundesliga': "The Bundesliga is renowned for its high-pressing systems and tactical innovation at the top level of German football.",
+            'La Liga': "La Liga represents the technical peak of Spanish football, emphasizing ball retention and tactical intelligence.",
+            'Serie A': "Serie A offers elite Italian football known for its sophisticated defensive structures and tactical discipline.",
+            'Ligue 1': "Ligue 1 is a highly competitive top tier in France, becoming increasingly known for its physical profile and technical development.",
         }
-        return contexts.get(tier, "")
+        
+        if league in league_specific:
+            return league_specific[league]
+            
+        # Generic tier-based fallbacks
+        generic_contexts = {
+            1: f"Competing at the highest level of {league} provides elite exposure and tactical testing.",
+            2: f"Playing in a second-tier league like {league} offers a demanding environment ideal for development.",
+            3: f"A mid-tier professional environment like {league} requires consistency and physical resilience.",
+            4: f"Competing in {league} provides essential professional experience in a competitive environment.",
+            5: f"Playing in {league} offers a platform for progression from a semi-professional or lower-tier professional level.",
+        }
+        
+        return generic_contexts.get(tier, f"Competing in the {league} requires consistent tactical discipline.")
     
     def _get_metric_context(self, metric: str, value: float, percentile: float) -> str:
         """Generate natural language description of a metric strength."""
