@@ -30,7 +30,7 @@ from utils import (
     METRIC_TOOLTIPS,
     LOW_DATA_LEAGUES,
     HIDDEN_GEMS_EXCLUDE_LEAGUE,
-    add_market_value_to_dataframe,
+
     generate_narrative_for_player,
 )
 from utils.visualizations import PlotlyVisualizations
@@ -94,15 +94,15 @@ def load_all_data():
     result = process_all_data('english_football_pyramid_master.csv', min_90s=0.5)
     df = result['dataframe']
     scaled = result['scaled_features']
-    scaler = result['scaler']
-    engine = SimilarityEngine(df, scaled, scaler)
+    scalers = result['scalers']
+    engine = SimilarityEngine(df, scaled, scalers)
     return result, engine, df, scaled
 
 # Separate clustering resource
 @st.cache_resource
 def get_clustered_players(df, scaled):
     df_clustered, clusterer = cluster_players(df, scaled)
-    df_clustered = add_market_value_to_dataframe(df_clustered)
+
     return df_clustered, clusterer
 
 def ensure_data_loaded():
@@ -122,15 +122,7 @@ def ensure_data_loaded():
 # ============================================================================
 
 with st.sidebar:
-    st.subheader("Scout Bias Settings")
-    bias_options = ["Conservative", "Neutral", "Aggressive"]
-    selected_bias = st.selectbox(
-        "Market Value Bias:",
-        options=bias_options,
-        index=bias_options.index("Neutral"),
-        help="Adjusts the multiplier for market value estimation."
-    )
-    st.session_state['scout_bias'] = selected_bias
+
     st.title("⚙️ Filters & Settings")
     
     # Age filter
@@ -359,15 +351,7 @@ if st.session_state.page == '🔍 Player Search':
                         st.metric("Completeness", f"{completeness:.0f}%")
 
                 
-                # Market Value
-                if 'Estimated_Value_£M' in player_data.index:
-                    est_value = player_data['Estimated_Value_£M']
-                    value_tier = player_data.get('Value_Tier', 'Unknown')
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("💰 Estimated Value", f"£{est_value:.2f}M")
-                    with col2:
-                        st.metric("📊 Value Rating", value_tier)
+
                 
                 st.divider()
                 
@@ -1017,9 +1001,9 @@ elif st.session_state.page == '💎 Hidden Gems':
     st.write("Discover young, high-performing players with excellent price-to-performance ratios")
     
     # Add tab selection
-    tab1, tab2 = st.tabs(["🔍 Performance Filters", "💰 Best Value Players"])
-    
-    with tab1:
+    # Results View
+    with st.container():
+        st.subheader("🔍 Performance Filters")
         # Metric sliders
         st.subheader("⚙️ Filter Criteria")
         
@@ -1106,7 +1090,7 @@ elif st.session_state.page == '💎 Hidden Gems':
             # Sort by goals/90 percentile descending
             gems_sorted = gems.sort_values('Gls/90_pct', ascending=False)
             
-            display_cols = ['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'xG90', 'Ast/90', 'xA90', 'Estimated_Value_£M', 'Value_Tier', 'Archetype']
+            display_cols = ['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'xG90', 'Ast/90', 'xA90', 'Archetype']
             st.dataframe(
                 gems_sorted[display_cols].head(50),
                 use_container_width=True,
@@ -1124,117 +1108,7 @@ elif st.session_state.page == '💎 Hidden Gems':
         else:
             st.info("No players match the selected criteria. Try adjusting the filters.")
     
-    with tab2:
-        # Price vs Performance Analysis
-        st.subheader("💰 Best Value Players - Price vs Performance")
-        st.write("Find the biggest bargains: high performance relative to estimated market value")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            value_league = st.selectbox(
-                "Filter by league:",
-                options=['all'] + LEAGUES,
-                key='value_league'
-            )
-        
-        with col2:
-            value_position = st.selectbox(
-                "Filter by position:",
-                options=['all'] + PRIMARY_POSITIONS,
-                key='value_position'
-            )
-        
-        with col3:
-            max_value_filter = st.slider(
-                "Max Value (£M):",
-                min_value=0.0,
-                max_value=50.0,
-                value=10.0,
-                step=0.5,
-                key='max_value'
-            )
-        
-        # Filter data
-        value_df = df_filtered.copy()
-        
-        if value_league != 'all':
-            value_df = value_df[value_df['League'] == value_league]
-        
-        if value_position != 'all':
-            value_df = value_df[value_df['Primary_Pos'] == value_position]
-        
-        if max_value_filter > 0:
-            value_df = value_df[value_df['Estimated_Value_£M'] <= max_value_filter]
-        
-        # Sort by Value_Score
-        value_df = value_df.sort_values('Value_Score', ascending=False)
-        
-        st.divider()
-        
-        # Show top bargains
-        st.subheader(f"🏆 Top 25 Best Value Players")
-        
-        if len(value_df) > 0:
-            # Calculate average percentile for display
-            percentile_cols = [col for col in value_df.columns if col.endswith('_pct')]
-            value_df['Avg_Percentile'] = value_df[percentile_cols].mean(axis=1)
-            
-            display_cols = [
-                'Player', 'Squad', 'League', 'Age', 'Primary_Pos',
-                'Estimated_Value_£M', 'Avg_Percentile', 'Value_Score', 'Value_Tier',
-                'Gls/90', 'xG90', 'Ast/90', 'xA90', 'Archetype'
-            ]
-            
-            # Format for display
-            top_value = value_df.head(25).copy()
-            top_value['Avg_Percentile'] = top_value['Avg_Percentile'].round(1)
-            top_value['Value_Score'] = top_value['Value_Score'].round(2)
-            
-            st.dataframe(
-                top_value[display_cols],
-                use_container_width=True,
-                hide_index=True
-            )
-            
-            # Value distribution chart
-            st.divider()
-            st.subheader("📊 Value Score Distribution")
-            
-            import plotly.express as px
-            
-            fig = px.scatter(
-                value_df.head(100),
-                x='Estimated_Value_£M',
-                y='Avg_Percentile',
-                size='Value_Score',
-                color='League',
-                hover_data=['Player', 'Squad', 'Age', 'Primary_Pos'],
-                title='Price vs Performance (Larger bubbles = Better value)',
-                color_discrete_map=LEAGUE_COLORS,
-                labels={
-                    'Estimated_Value_£M': 'Estimated Value (£M)',
-                    'Avg_Percentile': 'Average Percentile',
-                }
-            )
-            
-            fig.update_layout(
-                height=500,
-                template='plotly_dark'
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Export
-            csv = value_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download Value Analysis CSV",
-                data=csv,
-                file_name=f"value_analysis_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-            )
-        else:
-            st.info("No players match the selected criteria.")
+
 
 # ============================================================================
 # PAGE 4: LEADERBOARDS
@@ -1498,7 +1372,43 @@ elif st.session_state.page == '🏆 Leaderboards':
             highlight_player=highlight
         )
         
-        st.plotly_chart(universe_fig, use_container_width=True)
+        # Interactive chart with selection
+        selection = st.plotly_chart(
+            universe_fig,
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="points",
+            key="universe_plot_selection"
+        )
+        
+        # Handle selection
+        if selection and selection['selection']['points']:
+            try:
+                # Extract player name from customdata (index 0)
+                # Streamlit returns points as a list of dicts. We take the first one.
+                point_index = selection['selection']['points'][0]['point_index']
+                # We need to map point_index back to the dataframe row to get the name reliably
+                # Or trust customdata if available in the selection event (Streamlit 1.35+ supports this)
+                
+                # Robust approach: Get the row from the filtered df used for plotting
+                # Note: universe_df might be shuffled or filtered, so we need to be careful.
+                # However, Plotly returns point_index relative to the trace.
+                # Simplest way if customdata is passed: use it.
+                # But st.plotly_chart selection output structure:
+                # {'selection': {'points': [{'curve_number': 0, 'point_index': 123, 'point_number': 123, 'x': ..., 'y': ...}]}}
+                # It does NOT guaranteed return customdata in the event yet (depends on version).
+                
+                # Fallback: Get name from universe_df by index
+                clicked_player = universe_df.iloc[point_index]['Player']
+                
+                if st.button(f"🔍 Go to analysis for: {clicked_player}", type="primary", use_container_width=True):
+                    st.session_state.page = '🔍 Player Search'
+                    st.session_state.player_search = clicked_player
+                    st.rerun()
+                    
+            except Exception as e:
+                # Fail silently or log if index mismatch (e.g. during filtering updates)
+                pass
         
         # Explanation
         with st.expander("ℹ️ How to read the Tactical Style Map"):

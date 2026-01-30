@@ -265,7 +265,7 @@ class SimilarityEngine:
         self,
         df: pd.DataFrame,
         scaled_features: np.ndarray,
-        scaler: StandardScaler,
+        scalers: Dict[str, StandardScaler],
         min_90s: int = 10,
     ):
         """
@@ -274,12 +274,12 @@ class SimilarityEngine:
         Args:
             df: Processed player dataset
             scaled_features: Pre-scaled feature array (from data_engine)
-            scaler: Fitted StandardScaler object (from data_engine)
+            scalers: Dict of Fitted StandardScaler objects (from data_engine)
             min_90s: Minimum 90s for reliability (already filtered in df)
         """
         self.df = df.copy()
         self.scaled_features = scaled_features
-        self.scaler = scaler
+        self.scalers = scalers
         self.min_90s = min_90s
         
         # Validate input
@@ -544,17 +544,15 @@ class SimilarityEngine:
             pw_dict = PROFILE_WEIGHTS[profile_key]
             weights = np.array([pw_dict.get(col, 1.0) for col in FEATURE_COLUMNS])
             
-            # 2. Apply Exponential Strength Weighting
-            # Weight = Baseline * (Percentile / 50)^4
-            # This makes 99th percentile stats nearly 16x more important than mean (50th)
-            # and mutes <50th percentile stats nearly to zero.
+            # 2. Apply Triple Weighting for Elite Stats (>75th Percentile)
+            # This forces the engine to match on STRENGTHS, not generic averages
             for i, feat in enumerate(FEATURE_COLUMNS):
                 pct = target_row.get(f"{feat}_pct", 50)
                 
-                # Exponential scaling for strengths
-                # (pct/50)^4 makes 100th -> 16x, 80th -> 6.5x, 50th -> 1x, 20th -> 0.02x
-                strength_factor = (pct / 50.0) ** 4
-                weights[i] *= strength_factor
+                # Triple weighting for elite metrics
+                if pct > 75:
+                    weights[i] *= 3.0
+                # Penalty for weakness? Optional, but let's stick to the request: Reward strengths.
 
         # Normalize weights to preserve cosine scale
         norm_weights = weights / weights.mean()
@@ -585,23 +583,45 @@ class SimilarityEngine:
             
             sim = cosine_similarity(v1, v2)[0][0]
             
-            # Find Primary Match Driver (feature with smallest weighted distance)
-            diffs = np.abs(v1 - v2).flatten()
-            best_feat_idx = np.argmin(diffs)
-            best_feat_name = [features_subset[j] for j in shared_indices][best_feat_idx]
-            primary_drivers.append(RADAR_LABELS.get(best_feat_name, best_feat_name))
+            # Find Primary Match Drivers (Top 3 lowest weighted Euclidean distances)
+            # We want to explain WHY they match.
+            # Using weighted distance emphasizes the features that mattered most in the cosine calc
+            
+            # Extract relevant weights for shared features
+            shared_weights = norm_weights[shared_indices]
+            
+            # Weighted difference
+            # (Difference * Weight) gives magnitude of mismatch adjusted for importance
+            diffs = np.abs(v1 - v2).flatten() * shared_weights
+            
+            # Sort by smallest difference (closest match on important features)
+            sorted_indices = np.argsort(diffs)
+            
+            # Get top 3
+            top_3_indices = sorted_indices[:3]
+            top_3_feats = [features_subset[shared_indices[j]] for j in top_3_indices]
+            top_3_labels = [RADAR_LABELS.get(f, f) for f in top_3_feats]
+            
+            driver_str = "Driven by " + ", ".join(top_3_labels)
+            
+            # Stylistic Twin Check (>95%)
+            # We add this decoration here, but the similarity score penalty below might happen
+            # So we defer the decoration until after penalty
             
             # Aggressive Coverage Penalty
-            # This ensures top-flight players rarely match lower-league players 
-            # unless the lower-league player is TRULY exceptional in the overlapping stats.
             coverage = len(shared) / len(target_tracked)
             if coverage < 1.0:
-                # Quadratic penalty for missing metrics
                 sim *= (coverage ** 2)
+            
+            final_sim_score = sim * 100
+            
+            if final_sim_score > 95:
+                driver_str += " (Stylistic Twin)"
                 
-            final_similarities.append(sim)
+            final_similarities.append(final_sim_score)
+            primary_drivers.append(driver_str)
         
-        search_df['Match_Score'] = np.array(final_similarities) * 100
+        search_df['Match_Score'] = np.array(final_similarities)
         search_df['Primary_Driver'] = primary_drivers
         results = search_df[search_df.index != target_idx].sort_values('Match_Score', ascending=False)
         return results.head(top_n)

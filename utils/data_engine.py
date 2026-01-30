@@ -15,8 +15,11 @@ Main entry point: process_all_data(csv_path) - orchestrates all processing steps
 import pandas as pd
 import numpy as np
 from typing import Tuple, Dict, List, Optional
+import os
 from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 import warnings
+import glob
 
 from .constants import (
     FEATURE_COLUMNS,
@@ -60,6 +63,7 @@ def clean_player_name(name: any) -> str:
 def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
     """
     Load the master dataset and merge advanced metrics from individual files.
+    (Data Fix: Corrected file swap for Bundesliga/Serie A - Cache Bump)
     """
     try:
         df = pd.read_csv(file_path, low_memory=low_memory)
@@ -84,18 +88,35 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = 0.0
 
-    # Load and merge advanced files
-    advanced_files = {
-        'Premier League': 'data/Premier League Advanced Stats.csv',
-        'Bundesliga': 'data/Serie A Advanced Stats.csv', # Fixed swap
-        'La Liga': 'data/La Liga Advanced Stats.csv',
-        'Serie A': 'data/Bundesliga Advanced Stats.csv', # Fixed swap
-        'Ligue 1': 'data/Ligue Un Advanced Stats.csv'
-    }
+    # Dynamic Advanced Stats Loading
+    data_dir = os.path.dirname(file_path) # Assuming advanced stats are in same/similar dir
+    if not data_dir: data_dir = 'data'
+    
+    # Look for any file containing "Advanced Stats"
+    advanced_files = glob.glob(os.path.join(data_dir, "*Advanced Stats.csv"))
+    
+    print(f"ℹ️  Found {len(advanced_files)} advanced stats files.")
 
-    for league, adv_path in advanced_files.items():
+    for adv_path in advanced_files:
         try:
-            # Use ; as delimiter as requested
+            filename = os.path.basename(adv_path)
+            # Infer league from filename
+            current_league = None
+            for league_name in LEAGUES:
+                # Handle "Ligue Un" vs "Ligue 1"
+                check_name = league_name
+                if league_name == 'Ligue 1':
+                    check_name = 'Ligue Un'
+                
+                if check_name.lower() in filename.lower():
+                    current_league = league_name
+                    break
+            
+            if not current_league:
+                print(f"⚠️  Skipping {filename}: Could not infer league from filename.")
+                continue
+
+            # Load with semicolon delimiter
             adv_df = pd.read_csv(adv_path, sep=';', low_memory=False)
             
             # Normalize column names to match main dataframe
@@ -129,7 +150,11 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
                 adv_df['MergeKey_Squad'] = adv_df['Squad'].apply(normalize_name)
             
             # Identify players from this league in the main dataframe
-            league_mask = df['League'] == league
+            league_mask = df['League'] == current_league
+            if not league_mask.any():
+                print(f"ℹ️  No players found for {current_league} in master file (checking '{current_league}').")
+                continue
+
             league_players = df[league_mask].copy()
             league_players['MergeKey_Player'] = league_players['Player'].apply(normalize_name)
             league_players['MergeKey_Squad'] = league_players['Squad'].apply(normalize_name)
@@ -159,9 +184,13 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
             
             # Sub-select advanced data
             merge_cols_adv = ['MergeKey_Player', 'MergeKey_Squad'] + [c for c in advanced_metrics if c in adv_df.columns]
+            # Ensure we have at least one metric to merge
+            if len(merge_cols_adv) <= 2:
+                continue
+
             adv_subset = adv_df[merge_cols_adv].drop_duplicates(subset=['MergeKey_Player', 'MergeKey_Squad'])
             
-            # Remove existing advanced columns from league_players
+            # Remove existing advanced columns from league_players to avoid suffix creation
             league_players = league_players.drop(columns=[c for c in advanced_metrics if c in league_players.columns], errors='ignore')
             
             # Merge on keys
@@ -192,11 +221,13 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
                     merged[col] = 0.0
             
             # Update the main dataframe
-            df = pd.concat([df[~league_mask], merged], axis=0, ignore_index=True)
-            print(f"📊 Merged advanced stats for {league} ({len(merged)} players)")
+            # Drop old rows for this league and append new merged rows
+            df = df[df['League'] != current_league]
+            df = pd.concat([df, merged], axis=0, ignore_index=True)
+            print(f"📊 Merged advanced stats for {current_league} ({len(merged)} players)")
             
         except Exception as e:
-            print(f"⚠️  Warning: Could not merge advanced stats for {league} ({adv_path}): {e}")
+            print(f"⚠️  Warning: Could not merge advanced stats for {adv_path}: {e}")
 
     # Final validation of required columns
     required_columns = ['Player', 'Squad', 'League', 'Pos', 'Age', '90s'] + FEATURE_COLUMNS
@@ -457,27 +488,37 @@ def calculate_data_completeness(df: pd.DataFrame) -> pd.DataFrame:
 # FEATURE SCALING & NORMALIZATION
 # ============================================================================
 
-def scale_features(df: pd.DataFrame) -> Tuple[np.ndarray, StandardScaler]:
+def scale_features(df: pd.DataFrame) -> Tuple[np.ndarray, Dict[str, StandardScaler]]:
     """
     Positional Scaling (The "Anti-Bias" Fix).
-    Fit and transform features separately for FW, MF, and DF groups.
-    GKs are handled separately on GK_FEATURE_COLUMNS.
+    Fit and transform features separately for FW, MF, DF groups.
+    GKs are handled separately.
+    
+    Returns:
+        scaled_matrix: (N_samples, N_features + N_gk_features)
+        scalers: Dict mapping position group ('FW', 'MF', 'DF', 'GK') to its fitted scaler.
+                 This ensures we can re-scale correctly even if filtered.
     """
     # Initialize combined scaled matrix
     # Columns: [FEATURE_COLUMNS (13) | GK_FEATURE_COLUMNS (9)]
     # Total width: 22
     total_width = len(FEATURE_COLUMNS) + len(GK_FEATURE_COLUMNS)
     scaled_matrix = np.zeros((len(df), total_width))
+    scalers = {}
     
     # Outfield groups
     for pos in ['FW', 'MF', 'DF']:
         mask = df['Primary_Pos'] == pos
         if mask.any():
             scaler = StandardScaler()
-            # Fill NaN with 0 ONLY for scaling (NL defensive stats are NaN in DF)
+            # Fill NaN with 0 ONLY for scaling
             pos_data = df.loc[mask, FEATURE_COLUMNS].fillna(0)
             scaled_outfield = scaler.fit_transform(pos_data)
             scaled_matrix[mask, :len(FEATURE_COLUMNS)] = scaled_outfield
+            scalers[pos] = scaler
+        else:
+            # Fallback if a position is missing entirely
+            scalers[pos] = StandardScaler() # unused but prevents key error
             
     # Goalkeeper group
     gk_mask = df['Primary_Pos'] == 'GK'
@@ -486,10 +527,11 @@ def scale_features(df: pd.DataFrame) -> Tuple[np.ndarray, StandardScaler]:
         gk_data = df.loc[gk_mask, GK_FEATURE_COLUMNS].fillna(0)
         scaled_gk = gk_scaler.fit_transform(gk_data)
         scaled_matrix[gk_mask, len(FEATURE_COLUMNS):] = scaled_gk
+        scalers['GK'] = gk_scaler
+    else:
+        scalers['GK'] = StandardScaler()
     
-    # Return a dummy scaler for compatibility or the outfield one
-    # The SimilarityEngine will need to be updated to handle this split matrix
-    return scaled_matrix, StandardScaler().fit(df[FEATURE_COLUMNS].fillna(0))
+    return scaled_matrix, scalers
 
 
 def get_feature_statistics(df: pd.DataFrame) -> pd.DataFrame:
@@ -585,9 +627,29 @@ def process_all_data(csv_path: str, min_90s: int = MIN_MINUTES_PLAYED) -> Dict[s
     print(f"✓ Average completeness: {avg_completeness:.1f}%")
     
     # Step 7: Feature scaling
-    print("\n[7/7] Scaling features for similarity/clustering...")
-    scaled_features, scaler = scale_features(df_filtered)
-    print(f"✓ Scaled {scaled_features.shape[1]} features for {scaled_features.shape[0]} players")
+    print("\n[7/7] Scaling features and calculating PCA...")
+    scaled_features, scalers = scale_features(df_filtered)
+    print(f"✓ Scaled features for {scaled_features.shape[0]} players")
+    
+    # Step 8: PCA Calculation (Phase 3 Prep)
+    # We calculate PCA coordinates on the Scaled Features
+    # Note: We use the first 13 columns (Outfield features) for PCA as it's primarily for style analysis
+    # GKs will have their own or 0s
+    try:
+        pca = PCA(n_components=2)
+        # We only take the Outfield columns for the Galaxy view to prevent GK outliers distorting the map
+        outfield_matrix = scaled_features[:, :len(FEATURE_COLUMNS)]
+        
+        # Handle the fact that GKs are 0 in these columns - this clusters them at origin, which is fine
+        pca_coords = pca.fit_transform(outfield_matrix)
+        
+        df_filtered['PCA_X'] = pca_coords[:, 0]
+        df_filtered['PCA_Y'] = pca_coords[:, 1]
+        print(f"✓ Calculated PCA Coordinates (Explained Variance: {pca.explained_variance_ratio_})")
+    except Exception as e:
+        print(f"⚠️ PCA calculation failed: {e}")
+        df_filtered['PCA_X'] = 0.0
+        df_filtered['PCA_Y'] = 0.0
     
     # Compute statistics
     feature_stats = get_feature_statistics(df_filtered)
@@ -602,7 +664,7 @@ def process_all_data(csv_path: str, min_90s: int = MIN_MINUTES_PLAYED) -> Dict[s
     return {
         'dataframe': df_filtered,
         'scaled_features': scaled_features,
-        'scaler': scaler,
+        'scalers': scalers,
         'validation_report': validation_report,
         'feature_stats': feature_stats,
         'processing_info': {

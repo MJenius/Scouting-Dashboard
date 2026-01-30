@@ -177,26 +177,7 @@ class ScoutingDossierPDF(FPDF):
         self.multi_cell(0, 5, clean_narrative)
         self.ln(2)
 
-    def add_market_value(self, player_data: pd.Series):
-        """Add market value section."""
-        self.set_font('Arial', 'B', 12)
-        self.cell(0, 8, sanitize_text_for_pdf('MARKET VALUATION'), ln=True)
-        
-        self.set_font('Arial', '', 10)
-        value = player_data.get('Estimated_Value_£M', '-')
-        tier = player_data.get('Value_Tier', '-')
-        
-        if isinstance(value, (int, float)):
-            value_str = f"£{value:.1f}M"
-        else:
-            value_str = str(value)
-        
-        line1 = sanitize_text_for_pdf(f"Estimated Value: {value_str}")
-        line2 = sanitize_text_for_pdf(f"Value Tier: {tier}")
-        
-        self.cell(0, 6, line1, ln=True)
-        self.cell(0, 6, line2, ln=True)
-        self.ln(2)
+
 
     def add_confidence(self, completeness: float):
         """Add data confidence section."""
@@ -309,7 +290,7 @@ def generate_dossier(
     pdf.add_narrative(narrative)
     
     # Bottom metadata
-    pdf.add_market_value(player_data)
+
     pdf.add_confidence(player_data.get('Completeness_Score', 0))
     
     # Save PDF
