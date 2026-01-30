@@ -21,6 +21,10 @@ FEATURE_COLUMNS = [
     'TklW/90',   # Tackles Won per 90 minutes
     'Fls/90',    # Fouls Committed per 90 minutes
     'Fld/90',    # Fouls Drawn per 90 minutes
+    'xG90',      # Expected Goals per 90 minutes
+    'xA90',      # Expected Assists per 90 minutes
+    'xGChain90', # Possession involvement per 90 minutes
+    'xGBuildup90', # Buildup contribution per 90 minutes
 ]
 
 # Goalkeeper-specific features (for comparison when both players are GK)
@@ -37,8 +41,8 @@ GK_FEATURE_COLUMNS = [
 ]
 
 # Grouping for readability in UI
-OFFENSIVE_FEATURES = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90']
-POSSESSION_FEATURES = ['Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90']
+OFFENSIVE_FEATURES = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'xG90', 'xA90']
+POSSESSION_FEATURES = ['Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90', 'xGChain90', 'xGBuildup90']
 
 # ============================================================================
 # LEAGUE METADATA
@@ -99,15 +103,15 @@ PRIMARY_POSITIONS = ['FW', 'MF', 'DF', 'GK']
 # Decision (B): League-aware metric availability for completeness scoring
 # ============================================================================
 LEAGUE_METRIC_MAP = {
-    'Premier League': FEATURE_COLUMNS,           # All 9 metrics
-    'Championship': FEATURE_COLUMNS,             # All 9 metrics
-    'League One': FEATURE_COLUMNS,               # All 9 metrics
-    'League Two': FEATURE_COLUMNS,               # All 9 metrics
+    'Premier League': FEATURE_COLUMNS,           # All 13 metrics
+    'Championship': ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90'],
+    'League One': ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90'],
+    'League Two': ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90'],
     'National League': ['Gls/90', 'Ast/90'],    # Only attacking metrics tracked
-    'Bundesliga': FEATURE_COLUMNS,               # All 9 metrics
-    'La Liga': FEATURE_COLUMNS,                  # All 9 metrics
-    'Serie A': FEATURE_COLUMNS,                  # All 9 metrics
-    'Ligue 1': FEATURE_COLUMNS,                  # All 9 metrics
+    'Bundesliga': FEATURE_COLUMNS,               # All 13 metrics
+    'La Liga': FEATURE_COLUMNS,                  # All 13 metrics
+    'Serie A': FEATURE_COLUMNS,                  # All 13 metrics
+    'Ligue 1': FEATURE_COLUMNS,                  # All 13 metrics
 }
 
 # Leagues with limited data tracking (e.g. only goals/assists)
@@ -253,6 +257,12 @@ ARCHETYPES = {
         'key_metrics': ['Save%', 'GA90', 'CS%'],
         'color': '#8E44AD',  # Purple
     },
+    'Buildup Boss': {
+        'description': 'Deep-lying playmaker vital to possession and buildup. High xGBuildup contribution.',
+        'primary_position': 'MF',
+        'key_metrics': ['xGBuildup90', 'Int/90'],
+        'color': '#2980B9', # Strong Blue
+    },
 }
 
 
@@ -274,6 +284,10 @@ PROFILE_WEIGHTS = {
         'TklW/90': 0.3,   # Defensive stats matter very little
         'Fls/90': 0.8,    # Discipline has some relevance
         'Fld/90': 1.5,    # Drawing fouls is relevant (dribbling)
+        'xG90': 4.5,      # High weight for Expected Goals
+        'xA90': 2.5,      # High weight for Expected Assists
+        'xGChain90': 1.0,
+        'xGBuildup90': 0.5,
     },
     'Midfielder': {
         'Gls/90': 1.0,    # Goals matter but not primary
@@ -285,6 +299,10 @@ PROFILE_WEIGHTS = {
         'TklW/90': 2.2,   # Tackling is very important
         'Fls/90': 1.5,    # Discipline matters
         'Fld/90': 1.5,    # Drawing fouls matters
+        'xG90': 1.0,
+        'xA90': 3.0,
+        'xGChain90': 2.5,   # Moderate weight to capture playmaking
+        'xGBuildup90': 2.5, # Moderate weight to capture buildup influence
     },
     'Defender': {
         'Gls/90': 0.1,    # Goals matter very little for defenders
@@ -296,6 +314,10 @@ PROFILE_WEIGHTS = {
         'TklW/90': 4.0,   # Tackles are critical
         'Fls/90': 2.0,    # Discipline is very important
         'Fld/90': 1.8,    # Drawing fouls matters (positioning)
+        'xG90': 0.1,
+        'xA90': 0.2,
+        'xGChain90': 1.5,
+        'xGBuildup90': 2.0,
     },
     'Goalkeeper': {
         'GA90': 2.5,      # Goals Against per 90 (lower is better)
@@ -399,6 +421,10 @@ METRIC_TOOLTIPS = {
     'TklW/90': 'Tackles won per 90 minutes. Direct tackle success. Lower than total tackles.',
     'Fls/90': 'Fouls committed per 90 minutes. Discipline indicator—higher fouls suggests physical play.',
     'Fld/90': 'Fouls drawn per 90 minutes. Shows dribbling ability and how opponents react.',
+    'xG90': 'Expected Goals per 90 minutes. Measures the quality of chances a player is involved in.',
+    'xA90': 'Expected Assists per 90 minutes. Measures the quality of chances created for teammates.',
+    'xGChain90': 'Expected Goals Chain per 90. Measures total xG of every possession a player is involved in.',
+    'xGBuildup90': 'Expected Goals Buildup per 90. Measures xG of possessions a player is involved in, excluding shots and key passes.',
     'GA90': 'Goals against per 90 minutes (Goalkeepers). Lower is better. Affected by defense quality.',
     'Save%': 'Save percentage (Goalkeepers). Ratio of shots stopped to shots faced. Elite GKs: 70%+.',
     'CS%': 'Clean sheet percentage (Goalkeepers). Percentage of matches with zero goals conceded.',
@@ -406,4 +432,32 @@ METRIC_TOOLTIPS = {
     '90s': 'Total 90-minute equivalents played in season. Higher = more data reliability.',
     'Squad': 'Current club/team.',
     'League': 'Top-level league (PL, Championship, Bundesliga, etc.).',
+}
+
+# ============================================================================
+# RADAR CHART LABELS: Human-readable labels for visualizations
+# ============================================================================
+RADAR_LABELS = {
+    'Gls/90': 'Goals',
+    'Ast/90': 'Assists',
+    'Sh/90': 'Shots',
+    'SoT/90': 'Shot Accuracy',
+    'Crs/90': 'Crossing',
+    'Int/90': 'Interceptions',
+    'TklW/90': 'Tackles Won',
+    'Fls/90': 'Fouls Committed',
+    'Fld/90': 'Fouls Drawn',
+    'xG90': 'Expected Goals',
+    'xA90': 'Expected Assists',
+    'xGChain90': 'Possession Involvement',
+    'xGBuildup90': 'Buildup Contribution',
+    'GA90': 'Goals Against/90',
+    'Save%': 'Save %',
+    'CS%': 'Clean Sheets %',
+    'W': 'Wins',
+    'D': 'Draws',
+    'L': 'Losses',
+    'PKsv': 'Penalties Saved',
+    'PKm': 'Penalties Made',
+    'Saves': 'Total Saves',
 }

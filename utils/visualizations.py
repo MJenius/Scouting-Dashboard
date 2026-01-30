@@ -15,7 +15,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from typing import Optional, List, Dict, Tuple
 
-from .constants import FEATURE_COLUMNS, LEAGUE_COLORS, ARCHETYPES
+from .constants import FEATURE_COLUMNS, LEAGUE_COLORS, ARCHETYPES, RADAR_LABELS
 
 
 class PlotlyVisualizations:
@@ -80,7 +80,7 @@ class PlotlyVisualizations:
                 line=dict(width=0),
             ),
             text=plot_df['Player'],
-            hovertemplate='<b>%{text}</b><br>' + metric + ': %{y:.2f}<extra></extra>',
+            hovertemplate='<b>%{text}</b><br>' + RADAR_LABELS.get(metric, metric) + ': %{y:.2f}<extra></extra>',
             name='Players',
         ))
         

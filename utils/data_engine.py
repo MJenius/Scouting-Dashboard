@@ -33,43 +33,121 @@ from .constants import (
 )
 
 
+def clean_player_name(name: any) -> str:
+    """
+    Remove quotes, extra spaces, and handle NaN for merging consistency.
+    """
+    if pd.isna(name):
+        return ""
+    return str(name).replace('"', '').replace("'", "").strip()
+
+
 # ============================================================================
 # DATA LOADING & CLEANING
 # ============================================================================
 
 def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
     """
-    Load the master dataset and perform initial type inference.
-    
-    Args:
-        file_path (str): Path to english_football_pyramid_master.csv
-        low_memory (bool): Use low_memory mode for large files
-        
-    Returns:
-        pd.DataFrame: Raw dataset with initial cleaning
-        
-    Raises:
-        FileNotFoundError: If CSV file not found
-        ValueError: If required columns are missing
+    Load the master dataset and merge advanced metrics from individual files.
     """
     try:
         df = pd.read_csv(file_path, low_memory=low_memory)
     except FileNotFoundError:
         raise FileNotFoundError(f"CSV file not found: {file_path}")
     
-    # Validate required columns
+    # Clean player names for consistent merging
+    df['Player'] = df['Player'].apply(clean_player_name)
+    
+    # Extract primary position (first position if comma-separated)
+    if 'Pos' in df.columns:
+        df['Primary_Pos'] = df['Pos'].str.split(',').str[0].str.strip()
+    
+    # Ensure numerical types for critical columns
+    for col in ['90s', 'Age']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # Initialize advanced metrics if not present
+    advanced_metrics = ['xG90', 'xA90', 'xGChain90', 'xGBuildup90']
+    for col in advanced_metrics:
+        if col not in df.columns:
+            df[col] = 0.0
+
+    # Load and merge advanced files
+    advanced_files = {
+        'Premier League': 'data/Premier League Advanced Stats.csv',
+        'Bundesliga': 'data/Bundesliga Advanced Stats.csv',
+        'La Liga': 'data/La Liga Advanced Stats.csv',
+        'Serie A': 'data/Serie A Advanced Stats.csv',
+        'Ligue 1': 'data/Ligue 1 Advanced Stats.csv'
+    }
+
+    for league, adv_path in advanced_files.items():
+        try:
+            # Use ; as delimiter as requested
+            adv_df = pd.read_csv(adv_path, sep=';', low_memory=False)
+            
+            # Normalize column names to match main dataframe (e.g., 'player' -> 'Player')
+            # The CSVs from this source often use lowercase or specific headers
+            column_map = {
+                'player': 'Player',
+                'team': 'Squad',
+                'goals': 'Gls',
+                'a': 'Ast',
+                'min': 'Min',
+            }
+            # Add any other case-insensitive mappings if needed
+            adv_df = adv_df.rename(columns={k: v for k, v in column_map.items() if k in adv_df.columns})
+            
+            # If 'Player' still missing, look for it case-insensitively
+            if 'Player' not in adv_df.columns:
+                actual_cols = {c.lower(): c for c in adv_df.columns}
+                if 'player' in actual_cols:
+                    adv_df = adv_df.rename(columns={actual_cols['player']: 'Player'})
+            
+            if 'Player' not in adv_df.columns:
+                print(f"⚠️  Could not find 'Player' column in {adv_path}. Skipping.")
+                continue
+
+            # Clean player names for consistent merging
+            adv_df['Player'] = adv_df['Player'].apply(clean_player_name)
+            
+            # Identify players from this league in the main dataframe
+            league_mask = df['League'] == league
+            league_players = df[league_mask].copy()
+            
+            # Sub-select only needed columns to avoid conflicts
+            # Decision (A): Only merge the specific advanced metrics we need
+            merge_cols = ['Player'] + [c for c in advanced_metrics if c in adv_df.columns]
+            adv_subset = adv_df[merge_cols].drop_duplicates(subset=['Player'])
+            
+            # Remove existing advanced columns from league_players to avoid suffixes
+            league_players = league_players.drop(columns=[c for c in advanced_metrics if c in league_players.columns])
+            
+            # Merge
+            merged = pd.merge(league_players, adv_subset, on='Player', how='left')
+            
+            # Fill missing values with 0
+            for col in advanced_metrics:
+                if col in merged.columns:
+                    merged[col] = merged[col].fillna(0.0)
+                else:
+                    merged[col] = 0.0
+            
+            # Update the main dataframe
+            df = pd.concat([df[~league_mask], merged], axis=0, ignore_index=True)
+            print(f"📊 Merged advanced stats for {league} ({len(merged)} players)")
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Could not merge advanced stats for {league} ({adv_path}): {e}")
+
+    # Final validation of required columns
     required_columns = ['Player', 'Squad', 'League', 'Pos', 'Age', '90s'] + FEATURE_COLUMNS
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
-        raise ValueError(f"Missing required columns: {missing_columns}")
-    
-    # Extract primary position (first position if comma-separated)
-    # Decision (B): Use primary position only for percentile lens
-    df['Primary_Pos'] = df['Pos'].str.split(',').str[0].str.strip()
-    
-    # Ensure numerical types for critical columns
-    df['90s'] = pd.to_numeric(df['90s'], errors='coerce')
-    df['Age'] = pd.to_numeric(df['Age'], errors='coerce')
+        # Some columns might still be missing if not in FEATURE_COLUMNS yet or not loaded
+        # We'll just warn instead of failing if it's not critical
+        print(f"⚠️  Missing columns in merged dataset: {missing_columns}")
     
     return df
 

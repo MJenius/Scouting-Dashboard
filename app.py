@@ -77,7 +77,7 @@ if 'filters' not in st.session_state:
         'age_max': 35,
         'leagues': LEAGUES,
         'positions': PRIMARY_POSITIONS,
-        'min_90s': 10,
+        'min_90s': 0.5,
     }
 
 if 'page' not in st.session_state:
@@ -91,7 +91,7 @@ if 'page' not in st.session_state:
 @st.cache_data
 def load_all_data():
     """Load and process all data once per session."""
-    result = process_all_data('english_football_pyramid_master.csv')
+    result = process_all_data('english_football_pyramid_master.csv', min_90s=0.5)
     df = result['dataframe']
     scaled = result['scaled_features']
     scaler = result['scaler']
@@ -169,9 +169,10 @@ with st.sidebar:
     st.subheader("Minimum Minutes Played")
     min_90s = st.slider(
         "Min 90s:",
-        min_value=0,
-        max_value=30,
-        value=st.session_state.filters['min_90s'],
+        min_value=0.0,
+        max_value=30.0,
+        value=float(st.session_state.filters['min_90s']),
+        step=0.5,
         key='min_90s_slider'
     )
     st.session_state.filters['min_90s'] = min_90s
@@ -458,9 +459,11 @@ if st.session_state.page == '🔍 Player Search':
                     else:
                         st.info("Goalkeeper percentile data not available")
                 else:
-                    # Show standard outfield stats
+                    # Show standard outfield stats 
+                    # Decision (C): Include advanced stats in percentile bars
+                    from utils.constants import FEATURE_COLUMNS
                     percentiles = {}
-                    for feat in ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90']:
+                    for feat in FEATURE_COLUMNS:
                         pct_col = f'{feat}_pct'
                         if pct_col in player_data.index:
                             percentiles[feat] = player_data[pct_col]
@@ -793,7 +796,7 @@ if st.session_state.page == '🔍 Player Search':
         ].sort_values('Gls/90_pct', ascending=False)
         
         if len(trending) > 0:
-            display_cols = ['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'Gls/90_pct', 'Ast/90', 'Ast/90_pct', 'Archetype']
+            display_cols = ['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'xG90', 'Ast/90', 'xA90', 'Archetype']
             display_cols = [col for col in display_cols if col in trending.columns]
             
             st.dataframe(
@@ -982,6 +985,21 @@ elif st.session_state.page == '💎 Hidden Gems':
                 help="Maximum player age for hidden gems search."
             )
         
+        # Add advanced stat filters for Hidden Gems
+        col1, col2 = st.columns(2)
+        with col1:
+            min_xg = st.slider(
+                "Min xG90:",
+                0.0, 1.0, 0.0, step=0.05, key='gems_xg',
+                help=METRIC_TOOLTIPS.get('xG90', "Minimum expected goals per 90.")
+            )
+        with col2:
+            min_xa = st.slider(
+                "Min xA90:",
+                0.0, 1.0, 0.0, step=0.05, key='gems_xa',
+                help=METRIC_TOOLTIPS.get('xA90', "Minimum expected assists per 90.")
+            )
+        
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -1001,7 +1019,7 @@ elif st.session_state.page == '💎 Hidden Gems':
         with col3:
             min_games = st.slider(
                 "Min 90s:",
-                0, 30, 10, key='gems_games',
+                0.0, 30.0, 1.0, step=0.5, key='gems_games',
                 help=METRIC_TOOLTIPS.get('90s', "Minimum full matches played (90s) for reliability.")
             )
         
@@ -1009,6 +1027,8 @@ elif st.session_state.page == '💎 Hidden Gems':
         gems = df[
             (df['Gls/90'] >= min_goals) &
             (df['Ast/90'] >= min_assists) &
+            (df['xG90'] >= min_xg) &
+            (df['xA90'] >= min_xa) &
             (df['Age'] <= max_age) &
             (df['Gls/90_pct'] >= min_percentile) &
             (df['90s'] >= min_games)
@@ -1025,8 +1045,7 @@ elif st.session_state.page == '💎 Hidden Gems':
             # Sort by goals/90 percentile descending
             gems_sorted = gems.sort_values('Gls/90_pct', ascending=False)
             
-            display_cols = ['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'Gls/90_pct', 
-                           'Ast/90', 'Estimated_Value_£M', 'Value_Tier', 'Archetype']
+            display_cols = ['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'xG90', 'Ast/90', 'xA90', 'Estimated_Value_£M', 'Value_Tier', 'Archetype']
             st.dataframe(
                 gems_sorted[display_cols].head(50),
                 use_container_width=True,
@@ -1103,7 +1122,7 @@ elif st.session_state.page == '💎 Hidden Gems':
             display_cols = [
                 'Player', 'Squad', 'League', 'Age', 'Primary_Pos',
                 'Estimated_Value_£M', 'Avg_Percentile', 'Value_Score', 'Value_Tier',
-                'Gls/90', 'Ast/90', 'Archetype'
+                'Gls/90', 'xG90', 'Ast/90', 'xA90', 'Archetype'
             ]
             
             # Format for display
@@ -1166,9 +1185,10 @@ elif st.session_state.page == '🏆 Leaderboards':
     col1, col2, col3 = st.columns(3)
     
     with col1:
+        from utils.constants import FEATURE_COLUMNS
         metric = st.selectbox(
             "Select metric:",
-            options=['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90'],
+            options=FEATURE_COLUMNS,
             key='leaderboard_metric'
         )
     

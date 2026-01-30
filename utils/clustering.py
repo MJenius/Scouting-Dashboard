@@ -215,8 +215,8 @@ class PlayerArchetypeClusterer:
         # Position-based archetype mapping
         position_archetypes = {
             'FW': ['Target Man', 'Elite Keeper'],  # Fallback to elite if weird
-            'MF': ['Creative Playmaker', 'Ball-Winning Midfielder', 'Box-to-Box'],
-            'DF': ['Full-Back Playmaker', 'Aggressive Defender', 'Sweeper'],
+            'MF': ['Creative Playmaker', 'Ball-Winning Midfielder', 'Box-to-Box', 'Buildup Boss'],
+            'DF': ['Full-Back Playmaker', 'Aggressive Defender', 'Sweeper', 'Buildup Boss'],
             'GK': ['Elite Keeper'],
         }
         

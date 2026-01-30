@@ -26,7 +26,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics.pairwise import cosine_similarity
 from rapidfuzz import fuzz
 
-from .constants import FEATURE_COLUMNS, GK_FEATURE_COLUMNS, PROFILE_WEIGHTS, LEAGUES
+from .constants import FEATURE_COLUMNS, GK_FEATURE_COLUMNS, PROFILE_WEIGHTS, LEAGUES, RADAR_LABELS
 
 
 
@@ -67,29 +67,7 @@ class RadarChartGenerator:
     """
     
     def __init__(self):
-        self.feature_labels = {
-            'Gls/90': 'Goals',
-            'Ast/90': 'Assists',
-            'Sh/90': 'Shots',
-            'SoT/90': 'Shots on Target',
-            'Crs/90': 'Crosses',
-            'Int/90': 'Interceptions',
-            'TklW/90': 'Tackles Won',
-            'Fls/90': 'Fouls',
-            'Fld/90': 'Fouls Drawn',
-        }
-        
-        self.gk_feature_labels = {
-            'GA90': 'Goals Against/90',
-            'Save%': 'Save %',
-            'CS%': 'Clean Sheets %',
-            'W': 'Wins',
-            'D': 'Draws',
-            'L': 'Losses',
-            'PKsv': 'Penalties Saved',
-            'PKm': 'Penalties Made',
-            'Saves': 'Total Saves',
-        }
+        self.labels = RADAR_LABELS
 
     
     def generate_plotly_radar(
@@ -125,10 +103,10 @@ class RadarChartGenerator:
         # Select features based on position
         if is_goalkeeper:
             feature_list = GK_FEATURE_COLUMNS
-            labels = self.gk_feature_labels
         else:
             feature_list = FEATURE_COLUMNS
-            labels = self.feature_labels
+        
+        labels = self.labels
         
         # Prepare data
         categories = [labels.get(feat, feat) for feat in feature_list]
@@ -234,7 +212,7 @@ class RadarChartGenerator:
         
         # Formatting
         ax.set_xticks(angles[:-1])
-        ax.set_xticklabels([self.feature_labels.get(cat, cat) for cat in categories])
+        ax.set_xticklabels([self.labels.get(cat, cat) for cat in categories])
         ax.set_ylim(0, 100)
         ax.set_title(f"Player Profile Comparison", size=16, weight='bold', pad=20)
         ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
