@@ -26,7 +26,14 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics.pairwise import cosine_similarity
 from rapidfuzz import fuzz
 
-from .constants import FEATURE_COLUMNS, GK_FEATURE_COLUMNS, PROFILE_WEIGHTS, LEAGUES, RADAR_LABELS
+from .constants import (
+    FEATURE_COLUMNS, 
+    GK_FEATURE_COLUMNS, 
+    PROFILE_WEIGHTS, 
+    LEAGUES, 
+    RADAR_LABELS,
+    LEAGUE_METRIC_MAP
+)
 
 
 
@@ -189,7 +196,8 @@ class RadarChartGenerator:
             raise ImportError("Matplotlib required: pip install matplotlib")
         
         # Setup
-        categories = list(FEATURE_COLUMNS)
+        is_gk = any(feat in target_stats for feat in GK_FEATURE_COLUMNS)
+        categories = list(GK_FEATURE_COLUMNS if is_gk else FEATURE_COLUMNS)
         N = len(categories)
         angles = [n / float(N) * 2 * pi for n in range(N)]
         angles += angles[:1]  # Complete the circle
@@ -360,32 +368,30 @@ class SimilarityEngine:
         self,
         features: np.ndarray,
         profile: ProfileType,
+        target_indices: Optional[List[int]] = None,
+        custom_weights: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """
-        Apply position-specific weights to feature vector.
-        
-        Weights boost certain metrics for each profile:
-        - Attacker: Gls/90 (3.0), Sh/90 (2.5), SoT/90 (2.0)
-        - Midfielder: Ast/90 (2.5), Crs/90 (2.0), TklW/90 (1.8)
-        - Defender: Int/90 (2.5), TklW/90 (2.5), Fld/90 (1.5)
-        - Goalkeeper: No position weighting (uses unweighted features)
-        
-        Args:
-            features: Normalized feature array (shape: [n, 9] or [9])
-            profile: ProfileType enum (ATTACKER, MIDFIELDER, DEFENDER, GOALKEEPER)
-            
-        Returns:
-            Weighted features (same shape as input)
+        Apply position-specific weights and dynamic strength-based weighting.
         """
-        # Goalkeepers: skip position weighting since scaled features are based on FEATURE_COLUMNS
-        # Goalkeeper comparisons work best with raw similarity across standard metrics
         if profile == ProfileType.GOALKEEPER:
             return features
         
-        weights_dict = PROFILE_WEIGHTS[profile.value]
-        weights = np.array([weights_dict[col] for col in FEATURE_COLUMNS])
+        if custom_weights is not None:
+            # Use provided custom weights (normalized)
+            weights = custom_weights / custom_weights.mean()
+            return features * weights
         
-        # Normalize weights to maintain magnitude
+        # Default position weights
+        weights_dict = PROFILE_WEIGHTS[profile.value]
+        weights = np.array([weights_dict.get(col, 1.0) for col in FEATURE_COLUMNS])
+        
+        # Apply strength-based bias if target_indices provided
+        if target_indices:
+            for idx in target_indices:
+                weights[idx] *= 3.0 # Triple weight for strengths
+        
+        # Normalize weights
         weights = weights / weights.mean()
         
         return features * weights
@@ -394,22 +400,11 @@ class SimilarityEngine:
         self,
         target_player: str,
         comparison_player: str,
-        use_position_weights: bool = False,
+        use_position_weights: bool = True,
     ) -> Optional[Dict[str, float]]:
         """
-        Calculate which features drive the similarity between two players.
-        
-        Returns feature-level distances after weighting, showing which stats
-        are most similar vs different. Lower distance = more similar.
-        
-        Args:
-            target_player: First player name
-            comparison_player: Second player name
-            use_position_weights: Apply position-specific weighting
-            
-        Returns:
-            Dict of feature_name -> distance (0-1 scale), ordered by importance,
-            or None if players not found
+        Calculates feature-wise distances, sorted by the target player's strengths.
+        This ensures the 'Drivers' shown are the player's most important/best stats.
         """
         idx1 = self._find_player_index(target_player)
         idx2 = self._find_player_index(comparison_player)
@@ -419,127 +414,140 @@ class SimilarityEngine:
         
         row1 = self.df.loc[idx1]
         row2 = self.df.loc[idx2]
+        is_gk = row1['Primary_Pos'] == 'GK'
+        col_slice = slice(len(FEATURE_COLUMNS), None) if is_gk else slice(0, len(FEATURE_COLUMNS))
+        feature_set = GK_FEATURE_COLUMNS if is_gk else FEATURE_COLUMNS
         
-        # Get vectors
-        row1_idx = self.df.index.get_loc(idx1)
-        row2_idx = self.df.index.get_loc(idx2)
+        CORE_9 = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90']
+        tracked1 = set(LEAGUE_METRIC_MAP.get(row1['League'], CORE_9))
+        tracked2 = set(LEAGUE_METRIC_MAP.get(row2['League'], CORE_9))
+        shared = tracked1.intersection(tracked2)
         
-        vec1 = self.scaled_features[row1_idx].copy()
-        vec2 = self.scaled_features[row2_idx].copy()
+        vec1 = self.scaled_features[self.df.index.get_loc(idx1), col_slice]
+        vec2 = self.scaled_features[self.df.index.get_loc(idx2), col_slice]
         
-        # Apply weighting if needed
-        weights = np.ones(len(FEATURE_COLUMNS))
-        if use_position_weights:
-            pos1 = row1['Primary_Pos']
-            profile_map = {
-                'FW': ProfileType.ATTACKER,
-                'MF': ProfileType.MIDFIELDER,
-                'DF': ProfileType.DEFENDER,
-                'GK': ProfileType.GOALKEEPER,
-            }
-            profile1 = profile_map.get(pos1, ProfileType.MIDFIELDER)
-            
-            if profile1 != ProfileType.GOALKEEPER:
-                weights_dict = PROFILE_WEIGHTS[profile1.value]
-                weights = np.array([weights_dict[col] for col in FEATURE_COLUMNS])
-                weights = weights / weights.mean()
+        # We calculate attribution based on "Priority Distance"
+        # Drivers are shared metrics where the target player is strong
+        drivers_priority = {}
+        distances = {}
         
-        # Calculate feature-level distances (absolute differences)
-        feature_distances = np.abs(vec1 - vec2)
+        for i, feat in enumerate(feature_set):
+            if feat in shared:
+                # Raw distance in Z-scores
+                distances[feat] = abs(vec1[i] - vec2[i])
+                
+                # Priority for sorting: (Target Percentile * Position Weight)
+                # This ensures the list starts with the target's best/most important stats
+                pct = row1.get(f"{feat}_pct", 50)
+                pos_bonus = 1.0
+                if not is_gk and use_position_weights:
+                    profile_map = {'FW': 'Attacker', 'MF': 'Midfielder', 'DF': 'Defender'}
+                    profile_key = profile_map.get(row1['Primary_Pos'], 'Midfielder')
+                    pos_bonus = PROFILE_WEIGHTS[profile_key].get(feat, 1.0)
+                
+                drivers_priority[feat] = pct * pos_bonus
         
-        # Weight the distances
-        weighted_distances = feature_distances * weights
+        # Sort by priority (Highest percentile/importance first)
+        sorted_feats = sorted(drivers_priority.keys(), key=lambda x: drivers_priority[x], reverse=True)
         
-        # Normalize to 0-1 scale
-        max_distance = weighted_distances.max()
-        if max_distance > 0:
-            normalized_distances = weighted_distances / max_distance
-        else:
-            normalized_distances = weighted_distances
-        
-        # Build result dict, sorted by distance (most similar first)
-        attribution = {}
-        for i, feat in enumerate(FEATURE_COLUMNS):
-            attribution[feat] = float(normalized_distances[i])
-        
-        # Sort by distance (ascending = more similar features first)
-        attribution = dict(sorted(attribution.items(), key=lambda x: x[1]))
-        
-        return attribution
+        # Return distances in the sorted order
+        return {feat: distances[feat] for feat in sorted_feats}
     
     def find_similar_players(
         self,
         target_player: str,
         league: str = 'all',
         top_n: int = 5,
-        use_position_weights: bool = False,
+        use_position_weights: bool = True,
         use_percentiles: bool = False,
     ) -> Optional[pd.DataFrame]:
         """
-        Find similar players to target.
-        
-        Args:
-            target_player: Player name (supports fuzzy matching)
-            league: Filter by league ('all' for all)
-            top_n: Number of results (default: 5, max: 20)
-            use_position_weights: Apply position-specific weighting
-            use_percentiles: Use percentile-normalized stats instead of raw
-            
-        Returns:
-            DataFrame of similar players with Match_Score, or None if target not found
+        Find similar players with Profile-Centric Weighting & Shared-Metric Masking.
         """
-        # Find target
         target_idx = self._find_player_index(target_player)
         if target_idx is None:
             return None
         
         target_row = self.df.loc[target_idx]
-        target_position = target_row['Primary_Pos']
+        target_pos = target_row['Primary_Pos']
+        target_league = target_row['League']
+        is_gk = target_pos == 'GK'
         
-        # Map position to profile
-        profile_map = {
-            'FW': ProfileType.ATTACKER,
-            'MF': ProfileType.MIDFIELDER,
-            'DF': ProfileType.DEFENDER,
-            'GK': ProfileType.GOALKEEPER,
-        }
-        profile = profile_map.get(target_position, ProfileType.MIDFIELDER)
-
-        
+        col_slice = slice(len(FEATURE_COLUMNS), None) if is_gk else slice(0, len(FEATURE_COLUMNS))
+        features_subset = GK_FEATURE_COLUMNS if is_gk else FEATURE_COLUMNS
+            
         # Build search space
+        pos_mask = (self.df['Primary_Pos'] == 'GK') if is_gk else (self.df['Primary_Pos'] != 'GK')
         if league.lower() != 'all':
-            if league not in LEAGUES:
-                return None
-            search_mask = self.df['League'] == league
+            search_mask = (self.df['League'] == league) & pos_mask
         else:
-            search_mask = pd.Series(True, index=self.df.index)
+            search_mask = pos_mask
+            
+        search_df = self.df[search_mask].copy()
+        search_indices = search_df.index
+        search_feat_matrix = self.scaled_features[self.df.index.isin(search_indices)][:, col_slice].copy()
         
-        search_indices = self.df[search_mask].index
-        search_features = self.scaled_features[self.df.index.isin(search_indices)]
-        
-        # Get target features
         target_row_idx = self.df.index.get_loc(target_idx)
-        target_vector = self.scaled_features[target_row_idx].reshape(1, -1)
+        target_vector = self.scaled_features[target_row_idx, col_slice].copy()
         
-        # Apply weighting if requested
-        if use_position_weights:
-            search_features = self.apply_position_weighting(search_features, profile)
-            target_vector = self.apply_position_weighting(target_vector, profile)
+        # --- HYPER-STRENGTH EXPONENTIAL WEIGHTING ---
+        weights = np.ones(len(features_subset))
+        if not is_gk:
+            # 1. Start with position-relevant baseline
+            profile_map = {'FW': 'Attacker', 'MF': 'Midfielder', 'DF': 'Defender'}
+            profile_key = profile_map.get(target_pos, 'Midfielder')
+            pw_dict = PROFILE_WEIGHTS[profile_key]
+            weights = np.array([pw_dict.get(col, 1.0) for col in FEATURE_COLUMNS])
+            
+            # 2. Apply Exponential Strength Weighting
+            # Weight = Baseline * (Percentile / 50)^4
+            # This makes 99th percentile stats nearly 16x more important than mean (50th)
+            # and mutes <50th percentile stats nearly to zero.
+            for i, feat in enumerate(FEATURE_COLUMNS):
+                pct = target_row.get(f"{feat}_pct", 50)
+                
+                # Exponential scaling for strengths
+                # (pct/50)^4 makes 100th -> 16x, 80th -> 6.5x, 50th -> 1x, 20th -> 0.02x
+                strength_factor = (pct / 50.0) ** 4
+                weights[i] *= strength_factor
+
+        # Normalize weights to preserve cosine scale
+        norm_weights = weights / weights.mean()
+        target_vector *= norm_weights
+        search_feat_matrix *= norm_weights
+
+        # --- SHARED-METRIC MASKING ---
+        CORE_9 = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90']
+        target_tracked = set(LEAGUE_METRIC_MAP.get(target_league, CORE_9))
         
-        # Calculate cosine similarity
-        similarities = cosine_similarity(target_vector, search_features)[0]
+        final_similarities = []
+        for i, (idx, row) in enumerate(search_df.iterrows()):
+            comp_league = row['League']
+            comp_tracked = set(LEAGUE_METRIC_MAP.get(comp_league, CORE_9))
+            
+            shared = target_tracked.intersection(comp_tracked)
+            shared_indices = [j for j, f in enumerate(features_subset) if f in shared]
+            
+            if not shared_indices:
+                final_similarities.append(0); continue
+                
+            v1 = target_vector[shared_indices].reshape(1, -1)
+            v2 = search_feat_matrix[i, shared_indices].reshape(1, -1)
+            
+            sim = cosine_similarity(v1, v2)[0][0]
+            
+            # Aggressive Coverage Penalty
+            # This ensures top-flight players rarely match lower-league players 
+            # unless the lower-league player is TRULY exceptional in the overlapping stats.
+            coverage = len(shared) / len(target_tracked)
+            if coverage < 1.0:
+                # Quadratic penalty for missing metrics
+                sim *= (coverage ** 2)
+                
+            final_similarities.append(sim)
         
-        # Build results
-        results = self.df[search_mask].copy()
-        results['Match_Score'] = similarities * 100
-        
-        # Exclude target player from results
-        results = results[results.index != target_idx].sort_values(
-            'Match_Score', ascending=False
-        )
-        
-        # Limit results
-        top_n = min(top_n, 20)  # Cap at 20
+        search_df['Match_Score'] = np.array(final_similarities) * 100
+        results = search_df[search_df.index != target_idx].sort_values('Match_Score', ascending=False)
         return results.head(top_n)
     
     def compare_players(
@@ -597,24 +605,28 @@ class SimilarityEngine:
         # Calculate similarity
         match_score = cosine_similarity(vec1, vec2)[0][0] * 100
         
+        # Determine which features to compare
+        is_both_gk = row1['Primary_Pos'] == 'GK' and row2['Primary_Pos'] == 'GK'
+        feats_to_compare = GK_FEATURE_COLUMNS if is_both_gk else FEATURE_COLUMNS
+        
         # Build feature comparison
         feature_comparison = {}
-        for feat in FEATURE_COLUMNS:
-            val1 = row1[feat]
-            val2 = row2[feat]
-            feature_comparison[feat] = {
-                'player1': val1,
-                'player2': val2,
-                'difference': val2 - val1,
-                'player1_better': val1 > val2,
-            }
-            
-            # Add percentiles if available
-            pct1_col = f'{feat}_pct'
-            pct2_col = f'{feat}_pct'
-            if pct1_col in row1.index and pct2_col in row2.index:
-                feature_comparison[feat]['player1_pct'] = row1[pct1_col]
-                feature_comparison[feat]['player2_pct'] = row2[pct2_col]
+        for feat in feats_to_compare:
+            if feat in row1.index and feat in row2.index:
+                val1 = row1[feat]
+                val2 = row2[feat]
+                feature_comparison[feat] = {
+                    'player1': val1,
+                    'player2': val2,
+                    'difference': val2 - val1,
+                    'player1_better': val1 > val2 if feat not in ['GA90', 'L'] else val1 < val2,
+                }
+                
+                # Add percentiles if available
+                pct_col = f'{feat}_pct'
+                if pct_col in row1.index and pct_col in row2.index:
+                    feature_comparison[feat]['player1_pct'] = row1[pct_col]
+                    feature_comparison[feat]['player2_pct'] = row2[pct_col]
         
         return {
             'player1': {

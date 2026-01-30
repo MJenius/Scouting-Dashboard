@@ -79,7 +79,7 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
         'Bundesliga': 'data/Bundesliga Advanced Stats.csv',
         'La Liga': 'data/La Liga Advanced Stats.csv',
         'Serie A': 'data/Serie A Advanced Stats.csv',
-        'Ligue 1': 'data/Ligue 1 Advanced Stats.csv'
+        'Ligue 1': 'data/Ligue Un Advanced Stats.csv' # Corrected name
     }
 
     for league, adv_path in advanced_files.items():
@@ -87,23 +87,26 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
             # Use ; as delimiter as requested
             adv_df = pd.read_csv(adv_path, sep=';', low_memory=False)
             
-            # Normalize column names to match main dataframe (e.g., 'player' -> 'Player')
-            # The CSVs from this source often use lowercase or specific headers
+            # Normalize column names to match main dataframe
             column_map = {
                 'player': 'Player',
                 'team': 'Squad',
                 'goals': 'Gls',
                 'a': 'Ast',
                 'min': 'Min',
+                'xg90': 'xG90',
+                'xa90': 'xA90',
+                'xgchain90': 'xGChain90',
+                'xgbuildup90': 'xGBuildup90'
             }
-            # Add any other case-insensitive mappings if needed
-            adv_df = adv_df.rename(columns={k: v for k, v in column_map.items() if k in adv_df.columns})
+            # Add case-insensitive mappings
+            current_cols = {c.lower(): c for c in adv_df.columns}
+            rename_dict = {}
+            for k, v in column_map.items():
+                if k.lower() in current_cols:
+                    rename_dict[current_cols[k.lower()]] = v
             
-            # If 'Player' still missing, look for it case-insensitively
-            if 'Player' not in adv_df.columns:
-                actual_cols = {c.lower(): c for c in adv_df.columns}
-                if 'player' in actual_cols:
-                    adv_df = adv_df.rename(columns={actual_cols['player']: 'Player'})
+            adv_df = adv_df.rename(columns=rename_dict)
             
             if 'Player' not in adv_df.columns:
                 print(f"⚠️  Could not find 'Player' column in {adv_path}. Skipping.")
@@ -116,13 +119,12 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
             league_mask = df['League'] == league
             league_players = df[league_mask].copy()
             
-            # Sub-select only needed columns to avoid conflicts
-            # Decision (A): Only merge the specific advanced metrics we need
+            # Sub-select only needed columns
             merge_cols = ['Player'] + [c for c in advanced_metrics if c in adv_df.columns]
             adv_subset = adv_df[merge_cols].drop_duplicates(subset=['Player'])
             
             # Remove existing advanced columns from league_players to avoid suffixes
-            league_players = league_players.drop(columns=[c for c in advanced_metrics if c in league_players.columns])
+            league_players = league_players.drop(columns=[c for c in advanced_metrics if c in league_players.columns], errors='ignore')
             
             # Merge
             merged = pd.merge(league_players, adv_subset, on='Player', how='left')
@@ -145,36 +147,42 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
     required_columns = ['Player', 'Squad', 'League', 'Pos', 'Age', '90s'] + FEATURE_COLUMNS
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
-        # Some columns might still be missing if not in FEATURE_COLUMNS yet or not loaded
-        # We'll just warn instead of failing if it's not critical
         print(f"⚠️  Missing columns in merged dataset: {missing_columns}")
     
     return df
+
 
 
 def clean_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     Coerce all feature columns to float and handle missing values.
     
-    Strategy:
-    - Coerce to float (invalid values → NaN)
-    - Fill NaN with 0 ONLY for features (zeros are valid for "no goal", "no assist")
-    - Keep NaN meaningful where it indicates "not tracked" (National League defensive stats)
-    
-    Args:
-        df (pd.DataFrame): Dataset with feature columns
-        
-    Returns:
-        pd.DataFrame: Cleaned dataset with float features
+    Strategy (Anti-Bias):
+    - Coerce to float
+    - For NL: Keep defensive metrics (non Gls/Ast) as NaN to prevent "Defensive Failure" bias.
+    - For others: Fill NaN with 0.
     """
     df = df.copy()
+    
+    attacking_metrics = ['Gls/90', 'Ast/90']
     
     for col in FEATURE_COLUMNS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-            # Fill NaN with 0 for missing stats (safe for per-90 metrics)
-            df[col] = df[col].fillna(0)
+            
+            is_nl = df['League'] == 'National League'
+            if col not in attacking_metrics:
+                # Keep NaN for National League to avoid matching with failures
+                df.loc[~is_nl, col] = df.loc[~is_nl, col].fillna(0)
+            else:
+                # Attacking metrics: fill with 0 (safe)
+                df[col] = df[col].fillna(0)
     
+    # Handle GK metrics
+    for col in GK_FEATURE_COLUMNS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
     return df
 
 
@@ -354,61 +362,39 @@ def calculate_position_percentiles(df: pd.DataFrame) -> pd.DataFrame:
 
 def calculate_data_completeness(df: pd.DataFrame) -> pd.DataFrame:
     """
-    League-aware completeness scoring.
+    League-aware completeness scoring (updated for tier-aware requirements).
     
-    Decision (B): Adjust expected metric set based on league data availability.
-    - Premier League, Championship, League One, League Two: Score on all 9 features
-    - National League: Score ONLY on Gls/90, Ast/90 (defensive stats not tracked)
-    
-    Returns two scores:
-    - Completeness_Score: Main score (league-aware)
-    - Completeness_Core: Always based on Gls/90 and Ast/90 only
-    
-    Args:
-        df (pd.DataFrame): Dataset with feature columns
-        
-    Returns:
-        pd.DataFrame: Dataset with completeness scores
+    - Tier 1 (PL/Top 5): Requires Advanced 4 (xG/xA/Chain/Buildup) + core for 100%
+    - National League: Only requires core 2 (Gls/Ast) for 100%
+    - Others: Core 9 metrics
     """
     df = df.copy()
     
+    # Standard Tier 1 leagues that have advanced stats
+    ADVANCED_LEAGUES = ['Premier League', 'Bundesliga', 'La Liga', 'Serie A', 'Ligue 1']
+    
     def calculate_score(row: pd.Series, score_type: str = 'main') -> float:
-        """
-        Calculate completeness score for a single player.
-        
-        Args:
-            row: Player row
-            score_type: 'main' (league-aware) or 'core' (always Gls/Ast only)
-            
-        Returns:
-            float: Score 0-100
-        """
         if score_type == 'core':
-            # Always use only attacking metrics
             expected_metrics = ['Gls/90', 'Ast/90']
         else:
-            # Main score: use league-specific metric set
             league = row['League']
-            expected_metrics = LEAGUE_METRIC_MAP.get(league, FEATURE_COLUMNS)
+            if league == 'National League':
+                expected_metrics = ['Gls/90', 'Ast/90']
+            elif league in ADVANCED_LEAGUES:
+                expected_metrics = FEATURE_COLUMNS # All 13
+            else:
+                # Core 9 for Championship, L1, L2
+                expected_metrics = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90']
         
-        # Count non-null AND non-zero values (0 is valid data)
         found = sum(
             1 for metric in expected_metrics 
             if metric in row.index and pd.notna(row[metric]) and row[metric] > 0
         )
         
-        completeness = (found / len(expected_metrics)) * 100
-        return completeness
+        return (found / len(expected_metrics)) * 100
     
-    # Apply both scoring methods
-    df['Completeness_Score'] = df.apply(
-        lambda row: calculate_score(row, score_type='main'), 
-        axis=1
-    )
-    df['Completeness_Core'] = df.apply(
-        lambda row: calculate_score(row, score_type='core'), 
-        axis=1
-    )
+    df['Completeness_Score'] = df.apply(lambda row: calculate_score(row, 'main'), axis=1)
+    df['Completeness_Core'] = df.apply(lambda row: calculate_score(row, 'core'), axis=1)
     
     return df
 
@@ -419,29 +405,37 @@ def calculate_data_completeness(df: pd.DataFrame) -> pd.DataFrame:
 
 def scale_features(df: pd.DataFrame) -> Tuple[np.ndarray, StandardScaler]:
     """
-    Normalize feature columns using StandardScaler.
-    
-    Strategy:
-    - Fit scaler on entire filtered dataset
-    - Transforms: (value - mean) / std for each feature
-    - Output: Zero mean, unit variance per feature
-    - Suitable for cosine similarity and clustering
-    
-    Args:
-        df (pd.DataFrame): Dataset with feature columns
-        
-    Returns:
-        Tuple[np.ndarray, StandardScaler]: Scaled features and fitted scaler object
+    Positional Scaling (The "Anti-Bias" Fix).
+    Fit and transform features separately for FW, MF, and DF groups.
+    GKs are handled separately on GK_FEATURE_COLUMNS.
     """
-    scaler = StandardScaler()
+    # Initialize combined scaled matrix
+    # Columns: [FEATURE_COLUMNS (13) | GK_FEATURE_COLUMNS (9)]
+    # Total width: 22
+    total_width = len(FEATURE_COLUMNS) + len(GK_FEATURE_COLUMNS)
+    scaled_matrix = np.zeros((len(df), total_width))
     
-    # Extract feature columns (fill any remaining NaN with 0)
-    features = df[FEATURE_COLUMNS].fillna(0)
+    # Outfield groups
+    for pos in ['FW', 'MF', 'DF']:
+        mask = df['Primary_Pos'] == pos
+        if mask.any():
+            scaler = StandardScaler()
+            # Fill NaN with 0 ONLY for scaling (NL defensive stats are NaN in DF)
+            pos_data = df.loc[mask, FEATURE_COLUMNS].fillna(0)
+            scaled_outfield = scaler.fit_transform(pos_data)
+            scaled_matrix[mask, :len(FEATURE_COLUMNS)] = scaled_outfield
+            
+    # Goalkeeper group
+    gk_mask = df['Primary_Pos'] == 'GK'
+    if gk_mask.any():
+        gk_scaler = StandardScaler()
+        gk_data = df.loc[gk_mask, GK_FEATURE_COLUMNS].fillna(0)
+        scaled_gk = gk_scaler.fit_transform(gk_data)
+        scaled_matrix[gk_mask, len(FEATURE_COLUMNS):] = scaled_gk
     
-    # Fit and transform
-    scaled = scaler.fit_transform(features)
-    
-    return scaled, scaler
+    # Return a dummy scaler for compatibility or the outfield one
+    # The SimilarityEngine will need to be updated to handle this split matrix
+    return scaled_matrix, StandardScaler().fit(df[FEATURE_COLUMNS].fillna(0))
 
 
 def get_feature_statistics(df: pd.DataFrame) -> pd.DataFrame:

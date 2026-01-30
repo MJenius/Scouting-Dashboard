@@ -14,50 +14,56 @@ import os
 import tempfile
 from typing import Dict, Optional
 import re
+import unicodedata
+from .constants import (
+    FEATURE_COLUMNS, 
+    GK_FEATURE_COLUMNS, 
+    LEAGUE_TIERS,
+    RADAR_LABELS
+)
 
 
 def sanitize_text_for_pdf(text: str) -> str:
     """
-    Remove Unicode characters that aren't supported by standard PDF fonts.
-    
-    Args:
-        text: Input text that may contain emojis or special Unicode characters
-        
-    Returns:
-        Sanitized text with only ASCII-compatible characters
+    Ultiamte defensive sanitization to stop PDF font crashes.
     """
-    # Replace common Unicode characters with ASCII equivalents
+    if text is None:
+        return "-"
+    if not isinstance(text, str):
+        text = str(text)
+        
+    # Standardize unicode characters
+    text = unicodedata.normalize('NFKD', text)
+        
+    # Manual replacements for common football symbols that we want to keep as text
+    # Using hex codes for absolute certainty
     replacements = {
-        '➖': '-',
-        '—': '-',
-        '–': '-',
-        ''': "'",
-        ''': "'",
-        '"': '"',
-        '"': '"',
-        '…': '...',
-        '•': '*',
-        '→': '->',
-        '←': '<-',
-        '✓': '[OK]',
-        '✗': '[X]',
-        '⚠': '[!]',
-        '⚽': '',
-        '🌟': '*',
-        '💎': '',
-        '📊': '',
-        '🔍': '',
-        '⚔️': '',
-        '📥': '',
+        '\u2796': '-', # ➖ Heavy Minus
+        '\u2212': '-', # − Minus
+        '\u2013': '-', # – En Dash
+        '\u2014': '-', # — Em Dash
+        '\u2015': '-', # ― Horizontal Bar
+        '\u2018': "'", # ‘
+        '\u2019': "'", # ’
+        '\u201c': '"', # “
+        '\u201d': '"', # ”
+        '\u2026': '...', # …
+        '\u2022': '*', # •
+        '\u2192': '->', # →
+        '\u2191': '^', # ↑ 
+        '\u2193': 'v', # ↓
+        '\u2713': '[OK]', # ✓
+        '\u2717': '[X]', # ✗
+        '\u26a0': '[!]', # ⚠
+        '\xa3': 'GBP ', # £
     }
     
-    for unicode_char, ascii_char in replacements.items():
-        text = text.replace(unicode_char, ascii_char)
+    for uni, asc in replacements.items():
+        text = text.replace(uni, asc)
     
-    # Remove any remaining non-ASCII characters
-    text = re.sub(r'[^\x00-\x7F]+', '', text)
-    
-    return text
+    # Final safety: drop ANY remaining non-ASCII character
+    # Standard PDF fonts (Helvetica/Arial) will crash on anything > 127
+    return "".join(c if ord(c) < 128 else "" for c in text)
 
 
 class ScoutingDossierPDF(FPDF):
@@ -66,26 +72,39 @@ class ScoutingDossierPDF(FPDF):
     def header(self):
         """PDF header with title."""
         self.set_font('Arial', 'B', 18)
-        self.cell(0, 12, 'SCOUTING DOSSIER', ln=True, align='C')
+        self.cell(0, 12, sanitize_text_for_pdf('SCOUTING DOSSIER'), ln=True, align='C')
         self.set_font('Arial', 'I', 10)
-        self.cell(0, 6, 'Professional Player Analysis Report', ln=True, align='C')
+        self.cell(0, 6, sanitize_text_for_pdf('Professional Player Analysis Report'), ln=True, align='C')
         self.ln(5)
 
     def add_player_info(self, player_data: pd.Series):
         """Add player basic information section."""
         self.set_font('Arial', 'B', 14)
-        player_name = sanitize_text_for_pdf(str(player_data.get('Player', 'Unknown Player')))
+        player_name = sanitize_text_for_pdf(player_data.get('Player', 'Unknown Player'))
         self.cell(0, 10, player_name, ln=True)
         
         self.set_font('Arial', '', 11)
-        info_lines = [
-            f"Position: {player_data.get('Primary_Pos', '-')}  |  Age: {player_data.get('Age', '-')}  |  90s Played: {player_data.get('90s', '-')}",
-            f"Club: {sanitize_text_for_pdf(str(player_data.get('Squad', '-')))}",
-            f"League: {sanitize_text_for_pdf(str(player_data.get('League', '-')))}  (Tier {player_data.get('League_Tier', '-')})",
-            f"Archetype: {sanitize_text_for_pdf(str(player_data.get('Archetype', '-')))}",
-        ]
         
-        for line in info_lines:
+        # Format strings then sanitize
+        pos = player_data.get('Primary_Pos', '-')
+        age = player_data.get('Age', '-')
+        nineties = player_data.get('90s', '-')
+        club = player_data.get('Squad', '-')
+        league = player_data.get('League', '-')
+        
+        # Get tier from constants if missing in data
+        tier = player_data.get('League_Tier')
+        if pd.isna(tier) or tier == '-':
+            tier = LEAGUE_TIERS.get(league, '-')
+            
+        arch = player_data.get('Archetype', '-')
+        
+        l1 = sanitize_text_for_pdf(f"Position: {pos}  |  Age: {age}  |  90s Played: {nineties}")
+        l2 = sanitize_text_for_pdf(f"Club: {club}")
+        l3 = sanitize_text_for_pdf(f"League: {league}  (Tier {tier})")
+        l4 = sanitize_text_for_pdf(f"Archetype: {arch}")
+        
+        for line in [l1, l2, l3, l4]:
             self.cell(0, 6, line, ln=True)
         
         self.ln(3)
@@ -103,7 +122,12 @@ class ScoutingDossierPDF(FPDF):
         if position == 'GK':
             stats = ['GA90', 'Save%', 'CS%', 'Saves']
         else:
-            stats = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90']
+            # Show core plus advanced metrics for accuracy
+            stats = [
+                'Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 
+                'xG90', 'xA90', 'xGChain90', 'xGBuildup90',
+                'Int/90', 'TklW/90', 'Crs/90'
+            ]
         
         for feat in stats:
             if feat in player_data.index:
@@ -123,7 +147,9 @@ class ScoutingDossierPDF(FPDF):
                 else:
                     pct_str = "-"
                 
-                self.cell(0, 5, f"  {feat}: {value_str}  (Percentile: {pct_str})", ln=True)
+                # Sanitize the entire cell content
+                stat_line = sanitize_text_for_pdf(f"  {feat}: {value_str}  (Percentile: {pct_str})")
+                self.cell(0, 5, stat_line, ln=True)
         
         self.ln(2)
 
@@ -131,7 +157,7 @@ class ScoutingDossierPDF(FPDF):
         """Embed radar chart image."""
         if os.path.exists(image_path):
             self.set_font('Arial', 'B', 12)
-            self.cell(0, 8, 'PERFORMANCE PROFILE', ln=True)
+            self.cell(0, 8, sanitize_text_for_pdf('PERFORMANCE PROFILE'), ln=True)
             
             # Add image (centered, scaled to fit)
             self.image(image_path, x=30, w=150)
@@ -140,18 +166,21 @@ class ScoutingDossierPDF(FPDF):
     def add_narrative(self, narrative: str):
         """Add scout's narrative section."""
         self.set_font('Arial', 'B', 12)
-        self.cell(0, 8, "SCOUT'S TAKE", ln=True)
+        # Ensure header is sanitized
+        self.cell(0, 8, sanitize_text_for_pdf("SCOUT'S TAKE"), ln=True)
         
         self.set_font('Arial', '', 10)
-        # Sanitize narrative to remove unsupported Unicode characters
-        clean_narrative = sanitize_text_for_pdf(narrative)
+        # Strip Markdown bold/italic
+        clean_narrative = narrative.replace('**', '').replace('__', '').replace('*', '').replace('_', '')
+        # Deep sanitize
+        clean_narrative = sanitize_text_for_pdf(clean_narrative)
         self.multi_cell(0, 5, clean_narrative)
         self.ln(2)
 
     def add_market_value(self, player_data: pd.Series):
         """Add market value section."""
         self.set_font('Arial', 'B', 12)
-        self.cell(0, 8, 'MARKET VALUATION', ln=True)
+        self.cell(0, 8, sanitize_text_for_pdf('MARKET VALUATION'), ln=True)
         
         self.set_font('Arial', '', 10)
         value = player_data.get('Estimated_Value_£M', '-')
@@ -162,14 +191,17 @@ class ScoutingDossierPDF(FPDF):
         else:
             value_str = str(value)
         
-        self.cell(0, 6, f"Estimated Value: {value_str}", ln=True)
-        self.cell(0, 6, f"Value Tier: {tier}", ln=True)
+        line1 = sanitize_text_for_pdf(f"Estimated Value: {value_str}")
+        line2 = sanitize_text_for_pdf(f"Value Tier: {tier}")
+        
+        self.cell(0, 6, line1, ln=True)
+        self.cell(0, 6, line2, ln=True)
         self.ln(2)
 
     def add_confidence(self, completeness: float):
         """Add data confidence section."""
         self.set_font('Arial', 'B', 12)
-        self.cell(0, 8, 'DATA CONFIDENCE', ln=True)
+        self.cell(0, 8, sanitize_text_for_pdf('DATA CONFIDENCE'), ln=True)
         
         self.set_font('Arial', '', 10)
         
@@ -182,7 +214,8 @@ class ScoutingDossierPDF(FPDF):
         else:
             label = "[WARNING] Incomplete Data - Caution Advised"
         
-        self.cell(0, 6, f"{label} ({completeness:.0f}% complete)", ln=True)
+        confidence_line = sanitize_text_for_pdf(f"{label} ({completeness:.0f}% complete)")
+        self.cell(0, 6, confidence_line, ln=True)
         self.ln(2)
 
 
@@ -209,46 +242,50 @@ def save_radar_chart_image(
         temp_dir = tempfile.gettempdir()
         save_path = os.path.join(temp_dir, f"radar_{player_data.get('Player', 'player').replace(' ', '_')}.png")
     
-    # Get player profile
-    from utils.constants import FEATURE_COLUMNS
+    # Get player profile - ALWAYS use percentiles for the PDF radar chart to ensure visual scale (0-100)
+    # The raw per-90 stats are too small to visualize on a 0-100 scale.
+    from utils.constants import FEATURE_COLUMNS, GK_FEATURE_COLUMNS
     
-    target_stats = {feat: player_data.get(feat, 0) for feat in FEATURE_COLUMNS if feat in player_data.index}
+    is_gk = player_data.get('Primary_Pos') == 'GK'
+    feats = GK_FEATURE_COLUMNS if is_gk else FEATURE_COLUMNS
+    
+    # Extract percentiles for the radar
+    target_stats = {}
+    for feat in feats:
+        pct_col = f"{feat}_pct"
+        target_stats[feat] = player_data.get(pct_col, 0)
     
     comparison_stats = None
     if comparison_data is not None:
-        comparison_stats = {feat: comparison_data.get(feat, 0) for feat in FEATURE_COLUMNS if feat in comparison_data.index}
+        comparison_stats = {}
+        for feat in feats:
+            pct_col = f"{feat}_pct"
+            comparison_stats[feat] = comparison_data.get(pct_col, 0)
     
     # Generate radar chart
     generator = RadarChartGenerator()
+    # Note: generator already handles labels from RADAR_LABELS
     generator.generate_matplotlib_radar(
         target_stats=target_stats,
         comparison_stats=comparison_stats,
         target_name=player_data.get('Player', 'Player'),
         comparison_name=comparison_data.get('Player', 'Comparison') if comparison_data is not None else '',
         save_path=save_path,
-        dpi=200,
+        dpi=150, # Lower DPI slightly for faster PDF generation and smaller file size
     )
     
     return save_path
 
 
-def create_recruitment_dossier(
+def generate_dossier(
     player_data: pd.Series,
     narrative: str,
     output_path: str,
     radar_image_path: Optional[str] = None,
 ) -> str:
     """
-    Create comprehensive one-page recruitment dossier PDF.
-    
-    Args:
-        player_data: Player statistics
-        narrative: Scout's narrative text
-        output_path: Path to save PDF
-        radar_image_path: Optional path to radar chart image (will generate if not provided)
-        
-    Returns:
-        Path to created PDF file
+    Fully implemented recruitment dossier generation.
+    Includes Player Card, Radar Chart, and Scout's Take.
     """
     # Generate radar chart if not provided
     if radar_image_path is None or not os.path.exists(radar_image_path):
@@ -258,16 +295,34 @@ def create_recruitment_dossier(
     pdf = ScoutingDossierPDF()
     pdf.add_page()
     
-    # Add sections
+    # Add sections in professional order
     pdf.add_player_info(player_data)
-    pdf.add_key_stats(player_data)
+    
+    # Check if we should split columns or just stack
+    # Radar chart is the centerpiece
     pdf.add_radar_chart(radar_image_path)
-    pdf.add_market_value(player_data)
-    pdf.add_confidence(player_data.get('Completeness_Score', 0))
+    
+    # Detailed stats
+    pdf.add_key_stats(player_data)
+    
+    # AI Sentiment
     pdf.add_narrative(narrative)
     
+    # Bottom metadata
+    pdf.add_market_value(player_data)
+    pdf.add_confidence(player_data.get('Completeness_Score', 0))
+    
     # Save PDF
-    pdf.output(output_path)
+    try:
+        pdf.output(output_path)
+    except Exception as e:
+        # Fallback for OS-specific file errors
+        if "Permission denied" in str(e):
+            import random
+            alt_path = output_path.replace(".pdf", f"_{random.randint(100,999)}.pdf")
+            pdf.output(alt_path)
+            return alt_path
+        raise e
     
     return output_path
 
@@ -288,4 +343,4 @@ def export_scouting_pdf(
     Returns:
         Path to created PDF
     """
-    return create_recruitment_dossier(player_data, narrative, file_path)
+    return generate_dossier(player_data, narrative, file_path)

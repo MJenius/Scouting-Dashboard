@@ -733,7 +733,8 @@ def create_similarity_driver_chart(feature_attribution: Dict[str, float]) -> go.
     distances = list(feature_attribution.values())
     
     # Invert distances so that low distance (high similarity) shows as long bar
-    similarity_scores = [1 - d for d in distances]
+    # Formula assumes distances are in Z-score units (approx 0 to 2+)
+    similarity_scores = [max(0, 1 - (d / 2.0)) for d in distances]
     
     fig = go.Figure(data=[
         go.Bar(

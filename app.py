@@ -638,9 +638,12 @@ if st.session_state.page == '🔍 Player Search':
                             )
                             
                             if attribution:
-                                # Get top 2 most similar features (primary drivers)
-                                top_drivers = list(attribution.items())[:2]
-                                driver_text = ", ".join([f"{feat}" for feat, _ in top_drivers])
+                                # Get top 2 primary drivers
+                                # Drivers = High similarity (low dist) among the player's top-priority stats
+                                # Since attribution is already sorted by target priority, we just pick the ones with lowest distance in the top 5
+                                top_priority_stats = list(attribution.items())[:5]
+                                best_matches = sorted(top_priority_stats, key=lambda x: x[1])[:2]
+                                driver_text = ", ".join([f"{feat}" for feat, _ in best_matches])
                                 
                                 # Create expander for each match
                                 with st.expander(
@@ -667,9 +670,11 @@ if st.session_state.page == '🔍 Player Search':
                                         stat_cols[2].metric("Age", int(row['Age']))
                                     
                                     # Show similarity breakdown
-                                    st.write("**Similarity Breakdown:**")
+                                    st.write("**Similarity Breakdown (Target's Key Strengths):**")
                                     for feat, dist in list(attribution.items())[:5]:
-                                        similarity_pct = int((1 - dist) * 100)
+                                        # Convert Z-score distance to % similarity
+                                        # 0 distance = 100%, 2+ distance = 0%
+                                        similarity_pct = int(max(0, (1 - (dist / 2.0))) * 100)
                                         bar_length = int(similarity_pct / 5)
                                         bar = "█" * bar_length + "░" * (20 - bar_length)
                                         st.write(f"{feat}: {bar} {similarity_pct}%")
@@ -725,12 +730,12 @@ if st.session_state.page == '🔍 Player Search':
                                     
                                     st.write("**Most Similar Aspects:**")
                                     for feat, dist in most_similar_features:
-                                        similarity_pct = int((1 - dist) * 100)
+                                        similarity_pct = int(max(0, (1 - (dist / 2.0))) * 100)
                                         st.write(f"• {feat}: {similarity_pct}% similar")
                                     
                                     st.write("**Key Differences:**")
                                     for feat, dist in most_different_features:
-                                        similarity_pct = int((1 - dist) * 100)
+                                        similarity_pct = int(max(0, (1 - (dist / 2.0))) * 100)
                                         st.write(f"• {feat}: {similarity_pct}% similar (Lower match here)")
                                     
                                     # Summary
@@ -751,7 +756,7 @@ if st.session_state.page == '🔍 Player Search':
                     with col2:
                         if st.button("📥 Download PDF Dossier", key='download_pdf_player_search'):
                             try:
-                                from utils.pdf_export import create_recruitment_dossier
+                                from utils.pdf_export import generate_dossier
                                 from utils.llm_integration import generate_llm_narrative
                                 import tempfile
                                 import os
@@ -759,25 +764,32 @@ if st.session_state.page == '🔍 Player Search':
                                 # Generate narrative using LLM
                                 narrative = generate_llm_narrative(player_data, include_value=True)
                                 
-                                # Create temp PDF file
-                                temp_dir = tempfile.gettempdir()
-                                pdf_filename = f"scouting_dossier_{selected_player.replace(' ', '_')}.pdf"
-                                pdf_path = os.path.join(temp_dir, pdf_filename)
+                                # Create temp PDF file using a more robust method to avoid WinError 32
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                                    pdf_path = tmp.name
                                 
-                                # Generate PDF
-                                create_recruitment_dossier(player_data, narrative, pdf_path)
-                                
-                                # Read PDF for download
-                                with open(pdf_path, 'rb') as f:
-                                    pdf_data = f.read()
-                                
-                                st.download_button(
-                                    label="💾 Save PDF",
-                                    data=pdf_data,
-                                    file_name=pdf_filename,
-                                    mime="application/pdf",
-                                    key='save_pdf_button'
-                                )
+                                try:
+                                    # Generate PDF
+                                    generate_dossier(player_data, narrative, pdf_path)
+                                    
+                                    # Read PDF for download
+                                    with open(pdf_path, 'rb') as f:
+                                        pdf_data = f.read()
+                                    
+                                    st.download_button(
+                                        label="💾 Save PDF",
+                                        data=pdf_data,
+                                        file_name=f"scouting_dossier_{selected_player.replace(' ', '_')}.pdf",
+                                        mime="application/pdf",
+                                        key='save_pdf_button'
+                                    )
+                                finally:
+                                    # Cleanup
+                                    if os.path.exists(pdf_path):
+                                        try:
+                                            os.unlink(pdf_path)
+                                        except:
+                                            pass
                                 
                                 st.success("✓ PDF generated successfully!")
                             except Exception as e:
@@ -858,8 +870,10 @@ elif st.session_state.page == '⚔️ Head-to-Head':
             # Radar chart
             st.subheader("📊 Radar Comparison")
             
-            profile1 = engine.get_player_profile(player1, use_percentiles=False, is_goalkeeper=is_both_gk)
-            profile2 = engine.get_player_profile(player2, use_percentiles=False, is_goalkeeper=is_both_gk)
+            use_pct_radar = st.checkbox("Use Position Percentiles (Relative Quality)", value=True, key='h2h_radar_pct')
+            
+            profile1 = engine.get_player_profile(player1, use_percentiles=use_pct_radar, is_goalkeeper=is_both_gk)
+            profile2 = engine.get_player_profile(player2, use_percentiles=use_pct_radar, is_goalkeeper=is_both_gk)
             
             from utils.similarity import RadarChartGenerator
             generator = RadarChartGenerator()
@@ -868,7 +882,7 @@ elif st.session_state.page == '⚔️ Head-to-Head':
                 profile2,
                 player1,
                 player2,
-                use_percentiles=False,
+                use_percentiles=use_pct_radar,
                 is_goalkeeper=is_both_gk
             )
             st.plotly_chart(radar_fig, use_container_width=True)
@@ -906,42 +920,58 @@ elif st.session_state.page == '⚔️ Head-to-Head':
             
             if st.button("📥 Download Comparison PDF", key='download_pdf_h2h'):
                 try:
-                    from utils.pdf_export import create_recruitment_dossier
+                    from utils.pdf_export import generate_dossier, save_radar_chart_image
                     from utils.llm_integration import generate_llm_narrative
                     import tempfile
                     import os
                     
-                    # Generate narrative for player 1 using LLM
-                    narrative = generate_llm_narrative(df[df['Player'] == player1].iloc[0], include_value=True)
-                    narrative += f"\n\nComparison: {player1} vs {player2} - Match Score: {comparison['match_score']:.1f}%"
-                    
-                    # Create temp PDF file
-                    temp_dir = tempfile.gettempdir()
-                    pdf_filename = f"comparison_{player1.replace(' ', '_')}_vs_{player2.replace(' ', '_')}.pdf"
-                    pdf_path = os.path.join(temp_dir, pdf_filename)
-                    
-                    # Generate PDF with comparison
-                    player1_data = df[df['Player'] == player1].iloc[0]
-                    player2_data = df[df['Player'] == player2].iloc[0]
-                    
-                    from utils.pdf_export import save_radar_chart_image
-                    radar_path = save_radar_chart_image(player1_data, player2_data)
-                    
-                    create_recruitment_dossier(player1_data, narrative, pdf_path, radar_image_path=radar_path)
-                    
-                    # Read PDF for download
-                    with open(pdf_path, 'rb') as f:
-                        pdf_data = f.read()
-                    
-                    st.download_button(
-                        label="💾 Save Comparison PDF",
-                        data=pdf_data,
-                        file_name=pdf_filename,
-                        mime="application/pdf",
-                        key='save_comparison_pdf'
-                    )
-                    
-                    st.success("✓ Comparison PDF generated successfully!")
+                    with st.spinner("Generating professional comparison report..."):
+                        # Get data for both players
+                        p1_data = df[df['Player'] == player1].iloc[0]
+                        p2_data = df[df['Player'] == player2].iloc[0]
+                        
+                        # Generate narrative for comparison
+                        narrative = generate_llm_narrative(p1_data, include_value=True)
+                        narrative += f"\n\n**H2H ANALYSIS**: {player1} vs {player2}"
+                        narrative += f"\nMatch Score: {comparison['match_score']:.1f}%"
+                        narrative += "\nThis comparison identifies the stylistic overlap and performance gaps between these two profiles."
+                        
+                        # Create temp PDF file
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                            pdf_path = tmp.name
+                            
+                        try:
+                            # Generate radar image (with BOTH players)
+                            radar_path = save_radar_chart_image(p1_data, p2_data)
+                            
+                            # Generate PDF
+                            generate_dossier(p1_data, narrative, pdf_path, radar_image_path=radar_path)
+                            
+                            # Read PDF for download
+                            with open(pdf_path, 'rb') as f:
+                                pdf_data = f.read()
+                            
+                            st.download_button(
+                                label="💾 Save Comparison PDF",
+                                data=pdf_data,
+                                file_name=f"comparison_{player1.replace(' ', '_')}_vs_{player2.replace(' ', '_')}.pdf",
+                                mime="application/pdf",
+                                key='save_comparison_pdf'
+                            )
+                            
+                            st.success("✓ Comparison PDF generated successfully!")
+                        finally:
+                            # Cleanup
+                            if os.path.exists(pdf_path):
+                                try:
+                                    os.unlink(pdf_path)
+                                except:
+                                    pass
+                            if 'radar_path' in locals() and os.path.exists(radar_path):
+                                try:
+                                    os.unlink(radar_path)
+                                except:
+                                    pass
                 except Exception as e:
                     st.error(f"Failed to generate PDF: {e}")
 

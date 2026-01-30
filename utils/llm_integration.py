@@ -198,7 +198,7 @@ Write the scouting summary:"""
                 if include_value and 'Estimated_Value_£M' in player_data.index:
                     value = player_data['Estimated_Value_£M']
                     value_tier = player_data.get('Value_Tier', 'Unknown')
-                    narrative += f"\n\n**Market Value:** £{value:.1f}M ({value_tier})"
+                    narrative += f"\n\nMarket Value Analysis: Estimated at GBP {value:.1f}M, categorized as {value_tier}."
                 
                 return narrative
             else:
