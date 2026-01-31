@@ -35,12 +35,15 @@ def test_similarity_engine_structure():
         '90s': [10, 10, 10]
     })
     
-    # Scaled features (3 players, 2 features)
-    scaled = np.array([
-        [1.0, 0.0], # A
-        [0.9, 0.1], # B (Very similar to A)
-        [0.0, 1.0]  # C (Dissimilar)
-    ])
+    # Scaled features (3 players, 22 features: 13 outfield + 9 GK)
+    scaled = np.zeros((3, 22))
+    # Player A
+    scaled[0, 0] = 1.0 # Gls/90
+    # Player B (Very similar to A)
+    scaled[1, 0] = 0.9
+    scaled[1, 1] = 0.1
+    # Player C (Dissimilar)
+    scaled[2, 2] = 1.0
     
     scalers = {'FW': None} # Mock scaler dict
     

@@ -18,8 +18,9 @@ def test_get_players_with_data(client, valid_player_payload):
     response = client.get("/players/")
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert len(data) == 1
-    assert data[0]["name"] == "Test Player"
+    assert len(data) == 2
+    assert any(p["name"] == "Test Player" for p in data)
+    assert any(p["name"] == "Sim Player" for p in data)
 
 def test_get_player_by_id(client, valid_player_payload):
     """Test getting a single player by ID."""

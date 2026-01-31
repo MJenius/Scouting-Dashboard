@@ -14,6 +14,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backend.app.database import Base, get_db
 from backend.app.main import app, app_state
 from backend.app import models
+import utils
+import utils.data_engine
+import pandas as pd
+import numpy as np
 
 # In-memory SQLite database for testing
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -53,11 +57,23 @@ def client(db_session):
 
 @pytest.fixture(autouse=True)
 def mock_similarity_engine(monkeypatch):
-    """Mock the heavy SimilarityEngine logic."""
+    """Mock the heavy SimilarityEngine logic and data processing."""
+    
+    # 1. Mock process_all_data so lifespan doesn't load real CSVs
+    # We return dummy data that looks enough like the real result to not crash
+    def mock_process_all_data(*args, **kwargs):
+        return {
+            'dataframe': pd.DataFrame(),
+            'scaled_features': np.zeros((0, 22)),
+            'scalers': {}
+        }
+    monkeypatch.setattr(utils.data_engine, "process_all_data", mock_process_all_data)
+
     class MockEngine:
-        def find_similar_players(self, target_player, league, top_n, use_position_weights, scouting_priority, target_league_tier):
-             # Return a minimal pandas DataFrame-like structure or list of dicts if that's what the endpoint expects
-             import pandas as pd
+        def __init__(self, *args, **kwargs):
+            pass
+        
+        def find_similar_players(self, target_player, league='all', top_n=5, use_position_weights=True, scouting_priority='Standard', target_league_tier=None):
              return pd.DataFrame([{
                  'Player': 'Sim Player',
                  'Squad': 'Sim Squad',
@@ -71,10 +87,13 @@ def mock_similarity_engine(monkeypatch):
                  'Proxy_Warnings': None
              }])
 
-        def calculate_feature_attribution(self, target_player, comparison_player, use_position_weights):
+        def calculate_feature_attribution(self, target_player, comparison_player, use_position_weights=True):
             return {"Gls/90": 0.1, "Ast/90": -0.05}
     
-    # Mock the app_state to appear loaded
+    # Mock the class in utils
+    monkeypatch.setattr(utils, "SimilarityEngine", MockEngine)
+    
+    # Also set it on app_state directly to be safe
     app_state.is_loaded = True
     app_state.engine = MockEngine()
     yield
@@ -97,6 +116,18 @@ def valid_player_payload(db_session):
         stats=stats
     )
     db_session.add(player)
+    
+    # Add the simulated player that the mock engine returns
+    sim_player = models.Player(
+        name="Sim Player",
+        squad="Sim Squad",
+        league="Sim League",
+        position="FW",
+        age=24,
+        stats={"Gls/90": 0.8, "Ast/90": 0.2}
+    )
+    db_session.add(sim_player)
+    
     db_session.commit()
     db_session.refresh(player)
     return player
