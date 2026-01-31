@@ -121,5 +121,12 @@ streamlit run app.py
 
 ---
 
+## 🚧 Limitations & Future Work
+
+*   **Data Sparsity:** Lower league style-matching relies on output proxies due to lack of event-level data (dribbles/crosses).
+*   **Cold Start:** Initial ingestion handles 3,000+ players; migration to PostgreSQL is recommended for multi-season horizontal scaling.
+
+---
+
 ## ⚠️ Disclaimer
 Data sourced from various providers (FBref, Understat) for educational and demonstration purposes. This tool is a **Decision Support System** and should be used to *augment*, not replace, traditional video and live scouting.
