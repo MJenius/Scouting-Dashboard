@@ -238,7 +238,8 @@ PROFILE_WEIGHTS = {
     'FW': {'Gls/90': 2.0, 'xG90': 2.0},
     'AM': {'Ast/90': 2.0, 'xA90': 2.0},
     'CB': {'Int/90': 2.0, 'AerWon/90': 1.5},
-    'GK': {'PSxG+/-': 3.0, 'Save%': 2.0}
+    'GK': {'PSxG+/-': 3.0, 'Save%': 2.0},
+    'Goalkeeper': {'PSxG+/-': 3.0, 'Save%': 2.0}
 }
 
 # Threshold constants from data engine

@@ -34,6 +34,7 @@ from utils import (
     LEAGUE_TO_TIER,
 
     generate_narrative_for_player,
+    generate_comparison_narrative,
 )
 from utils.visualizations import PlotlyVisualizations
 from utils.recruitment_logic import project_to_tier
@@ -1012,6 +1013,22 @@ elif st.session_state.page == '⚔️ Head-to-Head':
             with col4:
                 st.metric("Match Score", f"{comparison['match_score']:.1f}%")
 
+            st.divider()
+
+            # Smart Summary
+            # Using engine to find correct indices (handles "Name (Squad)" format)
+            idx1 = engine._find_player_index(player1)
+            idx2 = engine._find_player_index(player2)
+            
+            if idx1 is not None and idx2 is not None:
+                p1_row = df.loc[idx1]
+                p2_row = df.loc[idx2]
+                
+                comp_narrative = generate_comparison_narrative(p1_row, p2_row)
+                
+                st.subheader("📝 Smart Analysis")
+                st.info(comp_narrative)
+            
             st.divider()
             
             # Check if both players are goalkeepers

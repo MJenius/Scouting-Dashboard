@@ -535,3 +535,70 @@ def generate_narrative_for_player(player_data: pd.Series, include_variance: bool
     
     return report['full_report']
 
+
+def generate_comparison_narrative(player1_data: pd.Series, player2_data: pd.Series) -> str:
+    """
+    Generate a comparison summary between two players.
+    """
+    gen = ScoutNarrativeGenerator()
+    
+    p1_name = player1_data.get('Player', 'Player 1').split()[-1]
+    p2_name = player2_data.get('Player', 'Player 2').split()[-1]
+    
+    # 1. Overall Dominance
+    p1_avg = gen._get_avg_percentile(player1_data)
+    p2_avg = gen._get_avg_percentile(player2_data)
+    
+    diff = p1_avg - p2_avg
+    
+    if diff > 10:
+        overall_text = f"**{p1_name}** is the statistically superior option (Avg Percentile: {p1_avg:.0f} vs {p2_avg:.0f}), showing significantly higher output across key metrics."
+    elif diff < -10:
+        overall_text = f"**{p2_name}** is the statistically superior option (Avg Percentile: {p2_avg:.0f} vs {p1_avg:.0f}), showing significantly higher output across key metrics."
+    elif diff > 5:
+        overall_text = f"**{p1_name}** holds a slight statistical edge (Avg Percentile: {p1_avg:.0f} vs {p2_avg:.0f}) with more consistent performance."
+    elif diff < -5:
+        overall_text = f"**{p2_name}** holds a slight statistical edge (Avg Percentile: {p2_avg:.0f} vs {p1_avg:.0f}) with more consistent performance."
+    else:
+        overall_text = f"Both players show **comparable overall quality** (Avg Percentile: {p1_avg:.0f} vs {p2_avg:.0f}), making the choice dependent on specific stylistic needs."
+
+    # 2. Key Differentiators
+    # Find metrics with largest percentile gap
+    is_gk = player1_data.get('Primary_Pos') == 'GK'
+    features_to_check = GK_FEATURE_COLUMNS if is_gk else FEATURE_COLUMNS
+    
+    gaps = []
+    for feat in features_to_check:
+        pct_col = f'{feat}_pct'
+        if pct_col in player1_data.index and pct_col in player2_data.index:
+            p1_val = player1_data[pct_col]
+            p2_val = player2_data[pct_col]
+            if not pd.isna(p1_val) and not pd.isna(p2_val):
+                gaps.append((feat, p1_val - p2_val))
+    
+    # Sort by magnitude of gap
+    gaps.sort(key=lambda x: abs(x[1]), reverse=True)
+    
+    if gaps:
+        top_diff = gaps[0]
+        feat, delta = top_diff
+        
+        if delta > 0:
+            diff_text = f"**{p1_name}** is significantly stronger in **{feat}** (+{delta:.0f}% higher percentile), whereas {p2_name} may lag in this area."
+        else:
+            diff_text = f"**{p2_name}** is significantly stronger in **{feat}** (+{abs(delta):.0f}% higher percentile), whereas {p1_name} may lag in this area."
+    else:
+        diff_text = "Their statistical profiles are extremely similar with no major usage gaps."
+
+    # 3. Archetype comparison
+    p1_arch = player1_data.get('Archetype', 'Unknown')
+    p2_arch = player2_data.get('Archetype', 'Unknown')
+    
+    if p1_arch != p2_arch and p1_arch != 'Unknown' and p2_arch != 'Unknown':
+        style_text = f"Stylistically, this is a clash between a **{p1_arch}** ({p1_name}) and a **{p2_arch}** ({p2_name})."
+    elif p1_arch == p2_arch and p1_arch != 'Unknown':
+        style_text = f"Both players share the **{p1_arch}** archetype, indicating a similar tactical role."
+    else:
+        style_text = "Both players present similar tactical profiles."
+        
+    return f"{overall_text}\n\n{style_text} {diff_text}"

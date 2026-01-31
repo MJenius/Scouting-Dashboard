@@ -50,6 +50,7 @@ from .clustering import (
 from .narrative_generator import (
     ScoutNarrativeGenerator,
     generate_narrative_for_player,
+    generate_comparison_narrative,
 )
 
 
@@ -104,6 +105,7 @@ __all__ = [
     # Narrative Generator
     'ScoutNarrativeGenerator',
     'generate_narrative_for_player',
+    'generate_comparison_narrative',
 
 
     # Config

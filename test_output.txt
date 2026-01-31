@@ -1,0 +1,9 @@
+--- Testing Comparison Narrative ---
+Both players show **comparable overall quality** (Avg Percentile: 76 vs 81), making the choice dependent on specific stylistic needs.
+
+Stylistically, this is a clash between a **Goalscoring Forward** (Haaland) and a **Complete Forward** (Kane). **Kane** is significantly stronger in **Ast/90** (+55% higher percentile), whereas Haaland may lag in this area.
+
+--- Testing Similar Narrative ---
+Both players show **comparable overall quality** (Avg Percentile: 76 vs 75), making the choice dependent on specific stylistic needs.
+
+Both players share the **Goalscoring Forward** archetype, indicating a similar tactical role. **Watkins** is significantly stronger in **Ast/90** (+10% higher percentile), whereas Haaland may lag in this area.

@@ -32,6 +32,9 @@
 - [ ] **Tactical Galaxy Search**:
     - (Low priority for this turn, focus on engine first).
 
+## 5. Head-to-Head Improvements
+- [x] **Smart Summary**: Add text-based summary comparing players overall + specific attributes before the chart.
+
 ## Checklist from User
 - [ ] Normalize NL
 - [ ] Dynamic k
