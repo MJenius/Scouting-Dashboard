@@ -125,3 +125,64 @@ class LeagueInfo(BaseModel):
     """League information with player count."""
     league: str
     player_count: int
+
+
+# =============================================================================
+# MODEL VALIDATION SCHEMAS
+# =============================================================================
+
+class FeatureContribution(BaseModel):
+    """Single feature contribution in SHAP explanation."""
+    feature: str = Field(..., description="Human-readable feature name")
+    feature_raw: str = Field(..., description="Original column name")
+    value: float = Field(..., description="Feature value for this player")
+    contribution: float = Field(..., description="SHAP contribution (+ or -)")
+
+
+class ModelMetricsResponse(BaseModel):
+    """Response for model evaluation metrics."""
+    mae: float = Field(..., description="Mean Absolute Error (£M)")
+    r2_score: float = Field(..., description="R² Score (0-1)")
+    train_mae: Optional[float] = Field(None, description="Training MAE")
+    train_r2: Optional[float] = Field(None, description="Training R²")
+    feature_importance: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Top 10 features by importance"
+    )
+    sample_count: int = Field(..., description="Total samples used")
+    train_count: Optional[int] = Field(None, description="Training set size")
+    test_count: Optional[int] = Field(None, description="Test set size")
+    model_type: str = Field("RandomForest", description="Model type")
+
+
+class ShapExplanationRequest(BaseModel):
+    """Request body for SHAP explanation."""
+    player_name: str = Field(..., description="Player name to explain")
+    top_n: int = Field(10, ge=1, le=20, description="Number of top contributions")
+
+
+class ShapExplanationResponse(BaseModel):
+    """Response for SHAP feature contribution explanation."""
+    player_name: str = Field(..., description="Player name")
+    base_value: float = Field(..., description="Expected/baseline prediction")
+    prediction: float = Field(..., description="Predicted market value (£M)")
+    contributions: List[FeatureContribution] = Field(
+        default_factory=list,
+        description="Sorted feature contributions"
+    )
+
+
+# =============================================================================
+# CLUSTERING VALIDATION SCHEMAS
+# =============================================================================
+
+class ClusterHealthResponse(BaseModel):
+    """Response for cluster health/silhouette score."""
+    silhouette_score: float = Field(
+        ..., ge=-1, le=1,
+        description="Silhouette Score (-1 to 1, higher = better)"
+    )
+    status: str = Field(..., description="Health status: Excellent/Good/Overlap Warning")
+    cluster_count: int = Field(..., description="Number of clusters")
+    sample_count: int = Field(..., description="Number of players clustered")
+

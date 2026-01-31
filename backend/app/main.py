@@ -44,7 +44,9 @@ class AppState:
     df: pd.DataFrame = None  # Full player dataframe
     scaled_features: np.ndarray = None  # Scaled feature matrix
     scalers: Dict = None  # Fitted scalers
+    evaluator: Any = None  # ModelEvaluator instance
     is_loaded: bool = False
+
 
 
 app_state = AppState()
@@ -584,3 +586,138 @@ def get_feature_attribution(
             status_code=500,
             detail=f"Attribution calculation failed: {str(e)}"
         )
+
+
+# =============================================================================
+# MODEL VALIDATION ENDPOINTS
+# =============================================================================
+
+@app.get("/analysis/model-metrics", response_model=schemas.ModelMetricsResponse)
+def get_model_metrics():
+    """
+    Get ML model evaluation metrics.
+    
+    Trains the market value Random Forest model with 80/20 split and returns:
+    - mae: Mean Absolute Error (£M)
+    - r2_score: R² Score (0-1)
+    - feature_importance: Top 10 features by importance
+    - sample_count: Number of training samples
+    
+    Note: First call may take a few seconds to train the model.
+    Subsequent calls use cached model.
+    """
+    if not app_state.is_loaded or app_state.df is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Data not loaded. Server may still be starting."
+        )
+    
+    try:
+        # Import and initialize evaluator
+        from .services.evaluator import get_evaluator, initialize_evaluator
+        
+        # Initialize evaluator if not already done
+        if app_state.evaluator is None:
+            logger.info("Initializing ModelEvaluator...")
+            app_state.evaluator = initialize_evaluator(app_state.df)
+        
+        # Get metrics
+        metrics = app_state.evaluator.get_metrics()
+        
+        if 'error' in metrics:
+            raise HTTPException(status_code=500, detail=metrics['error'])
+        
+        return schemas.ModelMetricsResponse(**metrics)
+        
+    except ImportError as e:
+        logger.error(f"Failed to import evaluator: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Evaluator service not available. Check if dependencies are installed."
+        )
+    except Exception as e:
+        logger.error(f"Model metrics failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Model evaluation failed: {str(e)}"
+        )
+
+
+@app.post("/analysis/shap-explanation", response_model=schemas.ShapExplanationResponse)
+def get_shap_explanation(request: schemas.ShapExplanationRequest):
+    """
+    Get SHAP explanation for a player's predicted market value.
+    
+    Uses TreeExplainer for exact SHAP values (fast for tree models).
+    Returns human-readable feature names for UI display.
+    
+    Request Body:
+    - player_name: Name of the player to explain
+    - top_n: Number of top features to return (default: 10)
+    
+    Returns:
+    - base_value: Expected baseline prediction
+    - prediction: Predicted market value for this player
+    - contributions: List of {feature, value, contribution} sorted by impact
+    """
+    if not app_state.is_loaded or app_state.df is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Data not loaded. Server may still be starting."
+        )
+    
+    try:
+        from .services.evaluator import get_evaluator, initialize_evaluator
+        
+        # Initialize evaluator if not already done
+        if app_state.evaluator is None:
+            logger.info("Initializing ModelEvaluator for SHAP...")
+            app_state.evaluator = initialize_evaluator(app_state.df)
+        
+        if not app_state.evaluator.is_trained:
+            raise HTTPException(
+                status_code=503,
+                detail="Model not trained. Insufficient training data."
+            )
+        
+        # Get SHAP explanation
+        explanation = app_state.evaluator.get_shap_explanation(
+            player_name=request.player_name,
+            top_n=request.top_n
+        )
+        
+        if explanation is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Could not generate explanation for '{request.player_name}'. "
+                       "Player may not be in the dataset or SHAP is not available."
+            )
+        
+        # Convert contributions to schema format
+        contributions = [
+            schemas.FeatureContribution(**contrib)
+            for contrib in explanation['contributions']
+        ]
+        
+        return schemas.ShapExplanationResponse(
+            player_name=explanation['player_name'],
+            base_value=explanation['base_value'],
+            prediction=explanation['prediction'],
+            contributions=contributions
+        )
+        
+    except HTTPException:
+        raise
+    except ImportError as e:
+        logger.error(f"SHAP not available: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="SHAP library not installed. Run: pip install shap"
+        )
+    except Exception as e:
+        logger.error(f"SHAP explanation failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"SHAP explanation failed: {str(e)}"
+        )
+

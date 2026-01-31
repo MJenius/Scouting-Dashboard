@@ -7,6 +7,7 @@ numpy>=1.24.0
 
 # Machine Learning
 scikit-learn>=1.3.0
+shap>=0.43.0  # SHAP explainability for ML models
 
 # Visualization
 plotly>=5.17.0

@@ -63,6 +63,8 @@ class PlayerArchetypeClusterer:
         self.pca = None
         self.archetype_profiles = {}
         self.player_archetypes = None
+        self.silhouette_score_: Optional[float] = None  # Cached Silhouette Score
+
     
     def optimize_k(self, k_range: range = range(8, 13)) -> int:
         """
@@ -424,10 +426,83 @@ class PlayerArchetypeClusterer:
                 
             self.player_archetypes['Outlier_Score'] = scores
 
+    def get_silhouette_score(self, max_samples: int = 1000) -> float:
+        """
+        Calculate Silhouette Score for current clustering.
+        
+        Uses sampling for large datasets to avoid O(N²) complexity.
+        Logs warning if score < 0.35 indicating cluster overlap.
+        
+        Args:
+            max_samples: Maximum samples for calculation (default: 1000)
+            
+        Returns:
+            Silhouette Score between -1 and 1 (higher = better separation)
+        """
+        import logging
+        import time
+        logger = logging.getLogger(__name__)
+        
+        # Return cached score if available
+        if self.silhouette_score_ is not None:
+            return self.silhouette_score_
+        
+        if self.kmeans is None or self.scaled_features is None:
+            logger.warning("Clustering not fitted. Cannot calculate Silhouette Score.")
+            return 0.0
+        
+        if len(self.scaled_features) < 10:
+            logger.warning("Insufficient data for Silhouette Score.")
+            return 0.0
+        
+        start_time = time.time()
+        
+        try:
+            labels = self.kmeans.predict(self.scaled_features)
+            n_samples = len(self.scaled_features)
+            
+            # Use sampling if dataset is large (O(N²) complexity)
+            if n_samples > max_samples:
+                sample_size = max_samples
+                logger.info(
+                    f"Using sampled Silhouette Score ({sample_size}/{n_samples} samples) "
+                    "for performance."
+                )
+            else:
+                sample_size = None
+            
+            score = silhouette_score(
+                self.scaled_features,
+                labels,
+                sample_size=sample_size,
+                random_state=self.RANDOM_STATE
+            )
+            
+            elapsed = time.time() - start_time
+            
+            # Cache the score
+            self.silhouette_score_ = float(score)
+            
+            # Log warning for overlap
+            if score < 0.35:
+                logger.warning(
+                    f"⚠️ Cluster Overlap Warning: Silhouette Score {score:.3f} < 0.35. "
+                    "Consider increasing K or reviewing feature selection."
+                )
+            else:
+                logger.info(f"✅ Cluster Silhouette Score: {score:.3f} (computed in {elapsed:.2f}s)")
+            
+            return self.silhouette_score_
+            
+        except Exception as e:
+            logger.error(f"Silhouette Score calculation failed: {e}")
+            return 0.0
+
 
 # ============================================================================
 # MAIN ENTRY POINT
 # ============================================================================
+
 
 def cluster_players(
     df: pd.DataFrame,

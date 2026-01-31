@@ -1591,6 +1591,41 @@ elif st.session_state.page == '🏆 Leaderboards':
         st.write("**Tactical Galaxy**: Players positioned by stylistic similarity via PCA (Principal Component Analysis)")
         st.caption("Each dot is a player. Proximity = Stylistic Similarity. Color = Assigned Archetype.")
         
+        # Model Confidence Metric (Silhouette Score)
+        clusterer = st.session_state.clusterer
+        if clusterer is not None:
+            try:
+                silhouette = clusterer.get_silhouette_score()
+                
+                # Determine confidence label and color
+                if silhouette >= 0.50:
+                    confidence_label = "🟢 Excellent"
+                    confidence_color = "success"
+                elif silhouette >= 0.35:
+                    confidence_label = "🟡 Good"
+                    confidence_color = "warning"
+                else:
+                    confidence_label = "🔴 Overlap Warning"
+                    confidence_color = "error"
+                
+                # Display as compact metric row
+                col_metric, col_status, col_spacer = st.columns([1, 1, 2])
+                with col_metric:
+                    st.metric(
+                        "Model Confidence",
+                        f"{silhouette:.3f}",
+                        help="Silhouette Score: -1 to 1. Higher = better cluster separation. <0.35 indicates significant overlap."
+                    )
+                with col_status:
+                    st.markdown(f"**Status:** {confidence_label}")
+                    if silhouette < 0.35:
+                        st.caption("⚠️ Clusters may overlap. Archetype assignments less reliable.")
+                
+                st.divider()
+            except Exception as e:
+                st.warning(f"Model confidence unavailable: {e}")
+
+        
         # Filter by archetype
         selected_universe_archs = st.multiselect(
             "Filter by Archetype:",
