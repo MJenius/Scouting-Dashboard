@@ -260,46 +260,51 @@ class PlayerArchetypeClusterer:
         centroid_values: np.ndarray,
     ) -> str:
         """
-        Select best-matching archetype label for a cluster.
-        
-        Strategy:
-        - Match cluster's top features against archetype definitions
-        - Prioritize position alignment
-        - Fall back to generic label if no clear match
+        Select best-matching archetype label for a cluster using strict positional filtering.
         
         Args:
             top_features: Top 3 features in cluster centroid
-            primary_position: Most common position in cluster
+            primary_position: Most common position in cluster ('FW', 'MF', 'DF', 'GK')
             centroid_values: Cluster centroid (normalized)
             
         Returns:
             Archetype label string
         """
-        # Position-based archetype mapping
-        position_archetypes = {
-            'FW': ['Target Man', 'Elite Keeper'],  # Fallback to elite if weird
-            'MF': ['Creative Playmaker', 'Ball-Winning Midfielder', 'Box-to-Box', 'Buildup Boss'],
-            'DF': ['Full-Back Playmaker', 'Aggressive Defender', 'Sweeper', 'Buildup Boss'],
-            'GK': ['Elite Keeper'],
-        }
+        # Normalize position for lookup
+        pos_map = {'FW': 'FW', 'AM': 'FW', 'CM': 'MF', 'DM': 'MF', 'FB': 'DF', 'CB': 'DF', 'GK': 'GK'}
+        norm_pos = pos_map.get(primary_position, primary_position)
         
-        # Get candidate archetypes for position
-        candidates = position_archetypes.get(primary_position, ARCHETYPE_NAMES)
+        # Get candidates that match this position
+        candidates = [
+            name for name, arch in ARCHETYPES.items() 
+            if arch.get('primary_position') == norm_pos
+        ]
         
-        # Score each candidate based on feature match
+        if not candidates:
+            # Fallback if no matching position found (shouldn't happen with norm_pos)
+            candidates = ARCHETYPE_NAMES
+            
+        # Score each candidate based on key metric overlap with top_features
         best_match = candidates[0]
-        best_score = 0
+        best_score = -1.0
         
         for archetype_name in candidates:
-            if archetype_name not in ARCHETYPES:
-                continue
-            
             archetype = ARCHETYPES[archetype_name]
-            key_metrics = archetype['key_metrics']
+            key_metrics = archetype.get('key_metrics', [])
             
-            # Compute overlap between top features and key metrics
+            # Compute overlap score
+            # Base score: number of top features that are key metrics for this archetype
             overlap = sum(1 for feat in top_features if feat in key_metrics)
-            score = overlap + 0.5 * (primary_position == archetype.get('primary_position', ''))
+            
+            # Tie-breaker: magnitude of key metrics in the centroid
+            # We use the average value of key metrics in this centroid to refine the match
+            feature_indices = [FEATURE_COLUMNS.index(m) for m in key_metrics if m in FEATURE_COLUMNS]
+            if feature_indices:
+                magnitude = np.mean([centroid_values[i] for i in feature_indices])
+            else:
+                magnitude = 0.0
+                
+            score = overlap + (magnitude * 0.1)
             
             if score > best_score:
                 best_score = score
@@ -507,86 +512,126 @@ class PlayerArchetypeClusterer:
 def cluster_players(
     df: pd.DataFrame,
     scaled_features: np.ndarray,
-    n_clusters: int = 8,
+    n_clusters_default: int = 5,
 ) -> Tuple[pd.DataFrame, 'PlayerArchetypeClusterer']:
     """
-    Assign players to archetypes using K-Means clustering.
-    Handles the split 22-wide feature matrix [outfield(13) | gk(9)].
+    Assign players to archetypes using Position-Specific K-Means clustering.
+    Strictly preserves the input index and length.
     """
     print("\n" + "=" * 80)
-    print("🎯 STARTING PLAYER ARCHETYPE CLUSTERING")
+    print("🎯 STARTING POSITIONAL PLAYER CLUSTERING")
     print("=" * 80)
     
-    # Separate goalkeepers from outfield players
-    is_gk = df['Primary_Pos'] == 'GK'
-    df_gk = df[is_gk].copy()
-    df_outfield = df[~is_gk].copy()
+    # 1. Broad Positional Mapping
+    POS_TO_GROUP = {
+        'FW': 'FW', 'ST': 'FW', 'RW': 'FW', 'LW': 'FW', 'AM': 'FW',
+        'CM': 'MF', 'DM': 'MF', 'MF': 'MF', 'RM': 'MF', 'LM': 'MF',
+        'FB': 'DF', 'CB': 'DF', 'WB': 'DF', 'DF': 'DF', 'LB': 'DF', 'RB': 'DF',
+    }
     
-    # Cluster outfield players (8 clusters) using columns 0-13
+    # Work on a copy to avoid side effects
+    df_work = df.copy()
+    
+    # Separate Goalkeepers
+    is_gk = df_work['Primary_Pos'] == 'GK'
+    df_outfield = df_work[~is_gk].copy()
+    outfield_indices = df_outfield.index
+    outfield_features = scaled_features[~is_gk, :len(FEATURE_COLUMNS)]
+    
     if len(df_outfield) > 0:
-        outfield_features = scaled_features[~is_gk, :len(FEATURE_COLUMNS)]
-        clusterer_outfield = PlayerArchetypeClusterer(outfield_features, n_clusters=n_clusters)
-        # Enable dynamic optimization for outfield players
-        clusterer_outfield.fit(df_outfield, optimize=True)
-        clusterer_outfield.calculate_outlier_scores() # Calculate Unicorn scores
-        df_outfield_clustered = clusterer_outfield.player_archetypes
-    else:
-        df_outfield_clustered = df_outfield
-        clusterer_outfield = None
+        # Assign broad groups (Fallback to MF for anything else)
+        df_outfield['Clustering_Group'] = df_outfield['Primary_Pos'].apply(
+            lambda x: POS_TO_GROUP.get(str(x).upper(), 'MF')
+        )
+        
+        # Global PCA for Outfield (Visualization Consistency)
+        pca_global = PCA(n_components=2, random_state=42)
+        pca_coords = pca_global.fit_transform(outfield_features)
+        df_outfield['PCA_X'] = pca_coords[:, 0]
+        df_outfield['PCA_Y'] = pca_coords[:, 1]
     
-    # Cluster goalkeepers separately using columns 13-22
+    clustered_parts = []
+    main_clusterer = None
+
+    # 2. Independent Clustering for each Outfield Group
+    if len(df_outfield) > 0:
+        # Ensure we handle every group including potential NaNs (which should be 'MF' now)
+        unique_groups = [g for g in df_outfield['Clustering_Group'].unique() if pd.notna(g)]
+        
+        for group_name in sorted(unique_groups):
+            mask = df_outfield['Clustering_Group'] == group_name
+            if not mask.any():
+                continue
+                
+            print(f"[Clustering] Group: {group_name} ({mask.sum()} players)")
+            
+            group_df = df_outfield[mask].copy()
+            # Find integer positions of these rows in the outfield matrix
+            group_pos_indices = np.where(mask.values)[0]
+            group_features = outfield_features[group_pos_indices]
+            
+            n_c = min(n_clusters_default, len(group_df))
+            if n_c < 2 and len(group_df) >= 2: n_c = 2
+            elif n_c < 1: n_c = 1
+            
+            clusterer = PlayerArchetypeClusterer(group_features, n_clusters=n_c)
+            clusterer.fit(group_df, optimize=False) 
+            clusterer.calculate_outlier_scores()
+            
+            clustered_parts.append(clusterer.player_archetypes)
+            main_clusterer = clusterer
+
+    # 3. Handle Goalkeepers
+    df_gk = df_work[is_gk].copy()
     if len(df_gk) > 0:
-        # GK logic with columns 13 to 22
         gk_features = scaled_features[is_gk, len(FEATURE_COLUMNS):]
         n_gk_clusters = min(3, len(df_gk))
         
-        if n_gk_clusters >= 2:
-            # Need a modified clusterer or just use the class
-            # Note: FEATURE_COLUMNS internally in PlayerArchetypeClusterer 
-            # might cause issues if it's hardcoded to outfield stats.
-            # We'll temporarily mock it or handle it.
+        from .constants import GK_FEATURE_COLUMNS
+        import utils.clustering as cl
+        original_fc = cl.FEATURE_COLUMNS
+        cl.FEATURE_COLUMNS = GK_FEATURE_COLUMNS
+        try:
+            gk_clusterer = PlayerArchetypeClusterer(gk_features, n_clusters=n_gk_clusters)
+            gk_clusterer.fit(df_gk, optimize=False)
+            df_gk_clustered = gk_clusterer.player_archetypes
             
-            # Since PlayerArchetypeClusterer uses FEATURE_COLUMNS, we need to pass GK equivalents
-            from .constants import GK_FEATURE_COLUMNS
-            
-            # Temporary monkeypatch of FEATURE_COLUMNS for GK clustering
-            import utils.clustering as cl
-            original_fc = cl.FEATURE_COLUMNS
-            cl.FEATURE_COLUMNS = GK_FEATURE_COLUMNS
-            
-            try:
-                clusterer_gk = PlayerArchetypeClusterer(gk_features, n_clusters=n_gk_clusters)
-                clusterer_gk.fit(df_gk)
-                df_gk_clustered = clusterer_gk.player_archetypes
-            finally:
-                cl.FEATURE_COLUMNS = original_fc
-            
+            # Map labels
             gk_archetype_map = {0: 'Shot-Stopper', 1: 'Sweeper-Keeper', 2: 'Ball-Playing GK'}
             df_gk_clustered['Archetype'] = df_gk_clustered['Cluster'].map(lambda x: gk_archetype_map.get(x, 'Elite Keeper'))
-        else:
-            df_gk_clustered = df_gk.copy()
-            df_gk_clustered['Archetype'] = 'Elite Keeper'
-            df_gk_clustered['Cluster'] = 0
-            df_gk_clustered['Archetype_Confidence'] = 1.0
-            df_gk_clustered['PCA_X'] = 0
-            df_gk_clustered['PCA_X'] = 0
+            df_gk_clustered['PCA_X'] = 0 
             df_gk_clustered['PCA_Y'] = 0
-            
-    # Ensure GK has outlier columns if missing
-    if 'Outlier_Score' not in df_gk_clustered.columns:
-        df_gk_clustered['Outlier_Score'] = 0.0
-        df_gk_clustered['Centroid_Distance'] = 0.0
+            clustered_parts.append(df_gk_clustered)
+        finally:
+            cl.FEATURE_COLUMNS = original_fc
+
+    # 4. Final Combination and Integrity Check
+    if not clustered_parts:
+        # Emergency fallback if no players clustered
+        df_result = df.copy()
+        df_result['Archetype'] = 'Unknown'
+        df_result['Cluster'] = -1
     else:
-        df_gk_clustered = df_gk
-    
-    # Combine results
-    df_combined = pd.concat([df_outfield_clustered, df_gk_clustered], axis=0).loc[df.index]
-    
-    print("\n" + "=" * 80)
-    print("✓ CLUSTERING COMPLETE")
+        # Combine all parts
+        df_result = pd.concat(clustered_parts, axis=0)
+        
+        # FINAL INTEGRITY CHECK: Ensure we haven't lost any rows
+        if len(df_result) < len(df):
+            print(f"⚠️  WARNING: Row count mismatch after clustering ({len(df_result)} vs {len(df)}). Recovering missing rows...")
+            missing_indices = df.index.difference(df_result.index)
+            if not missing_indices.empty:
+                df_missing = df.loc[missing_indices].copy()
+                df_missing['Archetype'] = 'Unknown'
+                df_missing['Cluster'] = -1
+                df_result = pd.concat([df_result, df_missing], axis=0)
+        
+        # Restore original order exactly
+        df_result = df_result.reindex(df.index)
+
+    print(f"✓ CLUSTERING COMPLETE: {len(df_result)} players processed.")
     print("=" * 80)
     
-    return df_combined, clusterer_outfield
+    return df_result, main_clusterer
 
 
 

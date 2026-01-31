@@ -127,7 +127,7 @@ def load_all_data():
     return result, engine, df, scaled
 
 # Separate clustering resource
-@st.cache_resource
+@st.cache_data
 def get_clustered_players(df, scaled):
     df_clustered, clusterer = cluster_players(df, scaled)
 
@@ -355,10 +355,11 @@ if st.session_state.page == '🔍 Player Search':
             if selected_player:
                 # Get player data using the expanded index lookup
                 idx = engine._find_player_index(selected_player)
-                if idx is not None:
+                if idx is not None and idx in df.index:
                     player_data = df.loc[idx]
                 else:
-                    st.error("Could not find selected player data.")
+                    st.error(f"⚠️ **Data Alignment Issue**: Could not find data for '{selected_player}' in the current tactical map.")
+                    st.info("This can happen if the cache is out of sync. Please click **'Reset Cache & Reload Data'** in the sidebar.")
                     st.stop()
                 
                 # Player card

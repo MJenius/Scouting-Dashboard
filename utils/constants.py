@@ -141,79 +141,126 @@ SCOUTING_PRIORITIES = {
 # ============================================================================
 
 ARCHETYPE_NAMES = [
-    'Target Man', 'Creative Playmaker', 'Box-to-Box', 
-    'Ball-Winning Midfielder', 'Aggressive Defender', 'Sweeper', 
-    'Full-Back Playmaker', 'Buildup Boss', 
-    'Elite Keeper', 'Shot-Stopper', 'Ball-Playing GK'
+    # Defenders
+    'No-Nonsense Stopper', 'Ball-Playing Defender', 'Modern Full-Back', 'Wing-Back Creator',
+    # Midfielders
+    'Deep-Lying Playmaker', 'Ball-Winning Midfielder', 'Box-to-Box Engine', 'Advanced Playmaker',
+    # Forwards/Attackers
+    'Clinical Finisher', 'Target Man', 'Creative Winger', 'Inside Forward', 'Shadow Striker',
+    # Goalkeepers
+    'Elite Keeper', 'Shot-Stopper', 'Ball-Playing GK', 'Sweeper-Keeper'
 ]
 
 # Definitions for clustering logic and visualization
 ARCHETYPES = {
-    'Target Man': {
-        'description': 'Aerial dominant forward who holds up play',
+    # DEFENDERS
+    'No-Nonsense Stopper': {
+        'description': 'Traditional defender prioritized on clearances and physical dominance.',
         'color': '#ff0000',
-        'primary_position': 'FW',
-        'key_metrics': ['AerWon/90', 'Gls/90']
+        'primary_position': 'DF',
+        'key_metrics': ['Clr/90', 'AerWon/90', 'TklW/90']
     },
-    'Creative Playmaker': {
-        'description': 'Creator who operates in the half-spaces',
+    'Ball-Playing Defender': {
+        'description': 'Modern center-back comfortable with possession and building from the back.',
+        'color': '#ff4444',
+        'primary_position': 'DF',
+        'key_metrics': ['PrgP', 'PassComp%', 'Int/90']
+    },
+    'Modern Full-Back': {
+        'description': 'Balanced wide defender contributing to both defense and ball progression.',
+        'color': '#ff8888',
+        'primary_position': 'DF',
+        'key_metrics': ['Drib/90', 'PrgC', 'TklW/90']
+    },
+    'Wing-Back Creator': {
+        'description': 'Highly offensive wide player who acts as a primary source of crosses and chances.',
+        'color': '#ffaa00',
+        'primary_position': 'DF',
+        'key_metrics': ['Crs/90', 'xA90', 'Ast/90']
+    },
+
+    # MIDFIELDERS
+    'Deep-Lying Playmaker': {
+        'description': 'Midfielder who operates from deep to dictate the tempo with passing range.',
         'color': '#00ff00',
         'primary_position': 'MF',
-        'key_metrics': ['Ast/90', 'xA90', 'KeyP/90']
-    },
-    'Box-to-Box': {
-        'description': 'All-around midfielder contributing to both phases',
-        'color': '#0000ff',
-        'primary_position': 'MF',
-        'key_metrics': ['TklW/90', 'Int/90', 'Gls/90']
+        'key_metrics': ['PrgP', 'PassComp%', 'xA90']
     },
     'Ball-Winning Midfielder': {
-        'description': 'Defensive specialist who breaks up play',
-        'color': '#ffff00',
+        'description': 'Protective specialist focused on interceptions and breaking up opposition play.',
+        'color': '#00cc00',
         'primary_position': 'MF',
-        'key_metrics': ['TklW/90', 'Int/90']
-    },
-    'Aggressive Defender': {
-        'description': 'Proactive defender who steps out to engage',
-        'color': '#ff00ff',
-        'primary_position': 'DF',
         'key_metrics': ['TklW/90', 'Int/90', 'Fls/90']
     },
-    'Sweeper': {
-        'description': 'Covering defender who cleans up behind',
+    'Box-to-Box Engine': {
+        'description': 'High-workrate midfielder who covers the entire pitch in both phases.',
+        'color': '#008800',
+        'primary_position': 'MF',
+        'key_metrics': ['PrgC', 'TklW/90', 'Gls/90']
+    },
+    'Advanced Playmaker': {
+        'description': 'Creative hub operating between the lines to create high-value chances.',
         'color': '#00ffff',
-        'primary_position': 'DF',
-        'key_metrics': ['Int/90', 'Clr/90']
+        'primary_position': 'MF',
+        'key_metrics': ['xA90', 'Ast/90', 'KeyP/90']
     },
-    'Full-Back Playmaker': {
-        'description': 'Wide defender who contributes to attack',
-        'color': '#ff8800',
-        'primary_position': 'DF',
-        'key_metrics': ['Crs/90', 'xA90']
+
+    # FORWARDS / ATTACKERS
+    'Clinical Finisher': {
+        'description': 'Goal-focused forward who excels at converting shots and finding space in the box.',
+        'color': '#0000ff',
+        'primary_position': 'FW',
+        'key_metrics': ['Gls/90', 'SoT/90', 'xG90']
     },
-    'Buildup Boss': {
-        'description': 'Deep lying playmaker or ball-playing CB',
-        'color': '#8800ff',
-        'primary_position': 'MF', # or DF
-        'key_metrics': ['PrgP', 'PassComp%']
+    'Target Man': {
+        'description': 'Physical presence who excels in aerial duels and holding up the ball.',
+        'color': '#000088',
+        'primary_position': 'FW',
+        'key_metrics': ['AerWon/90', 'Gls/90', 'Fld/90']
     },
+    'Creative Winger': {
+        'description': 'Wide attacker focused on beating markers and delivering high-quality crosses.',
+        'color': '#4444ff',
+        'primary_position': 'FW',
+        'key_metrics': ['Drib/90', 'Crs/90', 'xA90']
+    },
+    'Inside Forward': {
+        'description': 'Wide player who cuts inside onto their stronger foot to shoot or create.',
+        'color': '#8888ff',
+        'primary_position': 'FW',
+        'key_metrics': ['Sh/90', 'PrgC', 'Gls/90']
+    },
+    'Shadow Striker': {
+        'description': 'Advanced attacker who finds space behind the main forward to score.',
+        'color': '#aa00ff',
+        'primary_position': 'FW',
+        'key_metrics': ['xG90', 'Gls/90', 'SoT/90']
+    },
+
+    # GOALKEEPERS
     'Elite Keeper': {
-        'description': 'Top tier shot-stopper',
+        'description': 'All-around top tier shot-stopper with high command of the area.',
         'color': '#ffffff',
         'primary_position': 'GK',
-        'key_metrics': ['PSxG+/-']
+        'key_metrics': ['PSxG+/-', 'Save%', 'CS%']
     },
     'Shot-Stopper': {
-        'description': 'Keeper focused on saving',
+        'description': 'Keeper who primarily excels at reactionary saves and goal prevention.',
         'color': '#aaaaaa',
         'primary_position': 'GK',
-        'key_metrics': ['Save%']
+        'key_metrics': ['Save%', 'PSxG+/-']
     },
     'Ball-Playing GK': {
-        'description': 'Keeper comfortable with feet',
+        'description': 'Modern keeper involved in buildup with high distribution accuracy.',
         'color': '#333333',
         'primary_position': 'GK',
-        'key_metrics': ['Launch%']
+        'key_metrics': ['PassLen', 'Launch%']
+    },
+    'Sweeper-Keeper': {
+        'description': 'Proactive keeper who manages the space behind the defensive line.',
+        'color': '#666666',
+        'primary_position': 'GK',
+        'key_metrics': ['Swp/90', 'CrsStp%']
     }
 }
 

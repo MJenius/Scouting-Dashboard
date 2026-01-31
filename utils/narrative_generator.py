@@ -595,10 +595,14 @@ def generate_comparison_narrative(player1_data: pd.Series, player2_data: pd.Seri
     p2_arch = player2_data.get('Archetype', 'Unknown')
     
     if p1_arch != p2_arch and p1_arch != 'Unknown' and p2_arch != 'Unknown':
+        p1_desc = ARCHETYPES[p1_arch]['description'] if p1_arch in ARCHETYPES else ""
+        p2_desc = ARCHETYPES[p2_arch]['description'] if p2_arch in ARCHETYPES else ""
         style_text = f"Stylistically, this is a clash between a **{p1_arch}** ({p1_name}) and a **{p2_arch}** ({p2_name})."
+        if p1_desc and p2_desc:
+            style_text += f" While {p1_name} acts as a {p1_arch.lower()}, {p2_name} profile suggests a {p2_arch.lower()} role."
     elif p1_arch == p2_arch and p1_arch != 'Unknown':
-        style_text = f"Both players share the **{p1_arch}** archetype, indicating a similar tactical role."
+        style_text = f"Both players share the **{p1_arch}** archetype, indicating a similar tactical role and functional profile."
     else:
-        style_text = "Both players present similar tactical profiles."
+        style_text = "Both players present similar tactical profiles within their respective systems."
         
-    return f"{overall_text}\n\n{style_text} {diff_text}"
+    return f"{overall_text}\n\n{style_text}\n\n{diff_text}"
