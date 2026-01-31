@@ -18,11 +18,16 @@ from typing import Dict, List, Any, Optional, Tuple
 import logging
 import os
 import sys
+import joblib
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, r2_score
+
+# Define model path
+MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'models')
+MODEL_FILE = os.path.join(MODEL_DIR, 'market_value_model_bundle.joblib')
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -374,6 +379,20 @@ class ModelEvaluator:
             f"✅ Model trained: MAE=£{self.metrics['mae']:.2f}M, "
             f"R²={self.metrics['r2_score']:.3f}"
         )
+
+        # Save model bundle
+        try:
+            os.makedirs(MODEL_DIR, exist_ok=True)
+            model_bundle = {
+                'model': self.model,
+                'scaler': self.scaler,
+                'feature_columns': self.feature_columns,
+                'metrics': self.metrics
+            }
+            joblib.dump(model_bundle, MODEL_FILE)
+            logger.info(f"✅ Model bundle saved to {MODEL_FILE}")
+        except Exception as e:
+            logger.error(f"❌ Failed to save model bundle: {e}")
         
         return self.metrics
     
@@ -500,10 +519,42 @@ def get_evaluator() -> ModelEvaluator:
     return _evaluator_instance
 
 
+def load_model_if_exists(evaluator: ModelEvaluator) -> bool:
+    """Attempt to load trained model from disk."""
+    if os.path.exists(MODEL_FILE):
+        try:
+            logger.info(f"Loading model bundle from {MODEL_FILE}...")
+            bundle = joblib.load(MODEL_FILE)
+            
+            evaluator.model = bundle['model']
+            evaluator.scaler = bundle['scaler']
+            evaluator.feature_columns = bundle['feature_columns']
+            evaluator.metrics = bundle.get('metrics', {})
+            
+            # Re-initialize SHAP explainer
+            try:
+                import shap
+                evaluator.explainer = shap.TreeExplainer(evaluator.model)
+            except Exception as e:
+                logger.warning(f"Failed to re-initialize SHAP: {e}")
+            
+            evaluator.is_trained = True
+            logger.info("✅ Model loaded successfully from disk")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to load model from disk: {e}")
+            return False
+    return False
+
+
 def initialize_evaluator(df: pd.DataFrame) -> ModelEvaluator:
     """Initialize the evaluator with training data."""
     evaluator = get_evaluator()
     if not evaluator.is_trained:
+        # Try loading from disk first
+        if load_model_if_exists(evaluator):
+            return evaluator
+            
         try:
             evaluator.train_and_evaluate(df)
         except Exception as e:

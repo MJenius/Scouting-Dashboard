@@ -14,7 +14,11 @@ Features:
 import sys
 import os
 import numpy as np
+import json
+import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
+from collections import Counter
 
 # Add project root to path for imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -138,6 +142,61 @@ def upsert_players(session, players_data):
         
         session.execute(stmt)
 
+def setup_logging():
+    """Configure structured logging with rotation."""
+    log_dir = os.path.join(project_root, 'etl', 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, 'ingestion.log')
+    
+    # Create handlers
+    file_handler = RotatingFileHandler(
+        log_file, maxBytes=5*1024*1024, backupCount=3
+    )
+    console_handler = logging.StreamHandler()
+    
+    # Formatters
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Root logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+def generate_summary(df, total_processed, output_path):
+    """Generate and save data summary JSON."""
+    summary = {
+        'timestamp': datetime.utcnow().isoformat(),
+        'total_players': total_processed,
+        'league_counts': df['League'].value_counts().to_dict() if 'League' in df.columns else {},
+        'missing_data_pct': df.isna().mean().to_dict(),
+        'averages_by_league': {}
+    }
+    
+    # Calculate simple averages by league for key stats
+    if 'League' in df.columns:
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        # Filter for key stats to keep JSON small
+        key_stats = [c for c in numeric_cols if any(x in c for x in ['Gls', 'Ast', 'xG', 'Age'])]
+        
+        if key_stats:
+            summary['averages_by_league'] = df.groupby('League')[key_stats].mean().to_dict()
+            
+    # Save to file
+    # Handle numpy types for JSON serialization
+    summary = convert_numpy_types(summary)
+    
+    with open(output_path, 'w') as f:
+        json.dump(summary, f, indent=2)
+    
+    return summary
+
 
 def run_ingestion():
     """
@@ -149,29 +208,32 @@ def run_ingestion():
     3. Extract fixed fields and pack stats as JSON
     4. Upsert into SQLite with batch commits
     """
-    print("=" * 80)
-    print("🚀 STARTING ETL INGESTION")
-    print("=" * 80)
+    # Setup logging
+    logger = setup_logging()
+    
+    logger.info("=" * 80)
+    logger.info("🚀 STARTING ETL INGESTION")
+    logger.info("=" * 80)
     
     # Step 1: Create database tables
-    print("\n[1/4] Creating database tables...")
+    logger.info("[1/4] Creating database tables...")
     Base.metadata.create_all(bind=engine)
-    print("✓ Tables ready")
+    logger.info("✓ Tables ready")
     
     # Step 2: Load and process data using existing data_engine
-    print("\n[2/4] Processing CSV data...")
+    logger.info("[2/4] Processing CSV data...")
     csv_path = os.path.join(project_root, "english_football_pyramid_master.csv")
     
     if not os.path.exists(csv_path):
-        print(f"❌ Error: CSV file not found at {csv_path}")
+        logger.error(f"❌ Error: CSV file not found at {csv_path}")
         return
     
     result = process_all_data(csv_path)
     df = result['dataframe']
-    print(f"✓ Processed {len(df)} players from {df['League'].nunique()} leagues")
+    logger.info(f"✓ Processed {len(df)} players from {df['League'].nunique()} leagues")
     
     # Step 3: Transform and prepare for database insertion
-    print("\n[3/4] Transforming data for database...")
+    logger.info("[3/4] Transforming data for database...")
     
     session = SessionLocal()
     batch_size = 500
@@ -209,37 +271,45 @@ def run_ingestion():
                 upsert_players(session, players_batch)
                 session.commit()
                 total_processed += len(players_batch)
-                print(f"  → Processed {total_processed} players...")
+                logger.info(f"  → Processed {total_processed} players...")
                 players_batch = []
         
-        # Final batch
         if players_batch:
             upsert_players(session, players_batch)
             session.commit()
             total_processed += len(players_batch)
         
-        print(f"✓ Transformed {total_processed} players")
+        logger.info(f"✓ Transformed {total_processed} players")
         
     except Exception as e:
         session.rollback()
-        print(f"❌ Error during ingestion: {e}")
+        logger.error(f"❌ Error during ingestion: {e}")
         raise
     finally:
         session.close()
     
     # Step 4: Summary
-    print("\n[4/4] Verifying ingestion...")
+    logger.info("[4/4] Verifying ingestion and creating summary...")
+    
+    # Generate summary JSON
+    try:
+        summary_path = os.path.join(project_root, 'etl', 'data_summary.json')
+        generate_summary(df, total_processed, summary_path)
+        logger.info(f"✓ Data summary saved to {summary_path}")
+    except Exception as e:
+        logger.error(f"❌ Failed to generate summary: {e}")
+
     session = SessionLocal()
     try:
         player_count = session.query(Player).count()
         league_counts = session.query(Player.league).distinct().count()
-        print(f"✓ Database contains {player_count} players across {league_counts} leagues")
+        logger.info(f"✓ Database contains {player_count} players across {league_counts} leagues")
     finally:
         session.close()
     
-    print("\n" + "=" * 80)
-    print(f"✅ Ingested {total_processed} players into SQLite.")
-    print("=" * 80)
+    logger.info("=" * 80)
+    logger.info(f"✅ Ingested {total_processed} players into SQLite.")
+    logger.info("=" * 80)
 
 
 if __name__ == "__main__":
