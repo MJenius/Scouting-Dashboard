@@ -123,14 +123,14 @@ class LLMScoutNarrativeGenerator:
 - Assists/90: {ast_90:.2f}
 
 **Instructions:**
-Write a 3-4 sentence professional scouting summary. Include:
+**Instructions:**
+Write a 3 sentence professional scouting summary. Include:
 1. Playing style and archetype context
 2. How their strengths manifest in their league environment
 3. One tactical insight or development area
-4. Age-appropriate expectations
 
 **Tone:** Professional, analytical, balanced (not overly positive or negative)
-**Length:** 60-80 words
+**Length:** Around 50-60 words (strictly 3 sentences)
 **Format:** Plain text paragraph (no bullet points)
 
 **Example Style:**

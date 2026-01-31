@@ -799,28 +799,35 @@ if st.session_state.page == '🔍 Player Search':
                                     # Generate PDF
                                     generate_dossier(player_data, narrative, pdf_path)
                                     
-                                    # Read PDF for download
-                                    with open(pdf_path, 'rb') as f:
-                                        pdf_data = f.read()
+                                    # Read into bytes
+                                    with open(pdf_path, "rb") as f:
+                                        pdf_bytes = f.read()
                                     
-                                    st.download_button(
-                                        label="💾 Save PDF",
-                                        data=pdf_data,
-                                        file_name=f"scouting_dossier_{selected_player.replace(' ', '_')}.pdf",
-                                        mime="application/pdf",
-                                        key='save_pdf_button'
-                                    )
+                                    # Store in session state for download button
+                                    st.session_state['pdf_bytes'] = pdf_bytes
+                                    st.session_state['pdf_filename'] = f"{player_data.get('Player','player').replace(' ', '_')}_scouting_report.pdf"
+                                    
+                                    st.success("✅ Dossier generated successfully! Click below to download.")
+                                    
+                                except Exception as e:
+                                    st.error(f"Error generating PDF: {e}")
                                 finally:
-                                    # Cleanup
+                                    # Clean up temp file
                                     if os.path.exists(pdf_path):
-                                        try:
-                                            os.unlink(pdf_path)
-                                        except:
-                                            pass
-                                
-                                st.success("✓ PDF generated successfully!")
+                                        os.unlink(pdf_path)
+                                        
                             except Exception as e:
-                                st.error(f"Failed to generate PDF: {e}")
+                                st.error(f"Error preparing PDF: {e}")
+                        
+                        # Show download button if ready (Persistent)
+                        if 'pdf_bytes' in st.session_state:
+                            st.download_button(
+                                label="📥 Download PDF Dossier",
+                                data=st.session_state['pdf_bytes'],
+                                file_name=st.session_state['pdf_filename'],
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
         else:
             st.info("No players found. Try a different search term.")
     else:
@@ -1064,6 +1071,13 @@ elif st.session_state.page == '💎 Hidden Gems':
                 0.0, 1.0, 0.0, step=0.05, key='gems_xa',
                 help=METRIC_TOOLTIPS.get('xA90', "Minimum expected assists per 90.")
             )
+            
+        with col3:
+            min_fin_eff = st.slider(
+                "Min Finishing Eff:",
+                -0.5, 1.0, 0.0, step=0.05, key='gems_fin_eff',
+                help="Finishing Efficiency (Goals - xG). Positive values indicate clinical finishing overperformance."
+            )
         
         col1, col2, col3 = st.columns(3)
         
@@ -1094,6 +1108,7 @@ elif st.session_state.page == '💎 Hidden Gems':
             (df['Ast/90'] >= min_assists) &
             (df['xG90'] >= min_xg) &
             (df['xA90'] >= min_xa) &
+            (df['Finishing_Efficiency'] >= min_fin_eff) &
             (df['Age'] <= max_age) &
             (df['Gls/90_pct'] >= min_percentile) &
             (df['90s'] >= min_games)
@@ -1110,7 +1125,7 @@ elif st.session_state.page == '💎 Hidden Gems':
             # Sort by goals/90 percentile descending
             gems_sorted = gems.sort_values('Gls/90_pct', ascending=False)
             
-            display_cols = ['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'xG90', 'Ast/90', 'xA90', 'Archetype']
+            display_cols = ['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'Finishing_Efficiency', 'xG90', 'Ast/90', 'Archetype']
             st.dataframe(
                 gems_sorted[display_cols].head(50),
                 use_container_width=True,
@@ -1421,10 +1436,13 @@ elif st.session_state.page == '🏆 Leaderboards':
                 # Fallback: Get name from universe_df by index
                 clicked_player = universe_df.iloc[point_index]['Player']
                 
-                if st.button(f"🔍 Go to analysis for: {clicked_player}", type="primary", use_container_width=True):
-                    st.session_state.page = '🔍 Player Search'
-                    st.session_state.player_search = clicked_player
-                    st.rerun()
+                # Direct update and rerun
+                st.session_state.page = '🔍 Player Search'
+                st.session_state.player_search = clicked_player
+                # Clear previous selection to force new lookup based on search
+                if 'selected_player' in st.session_state:
+                     del st.session_state['selected_player']
+                st.rerun()
                     
             except Exception as e:
                 # Fail silently or log if index mismatch (e.g. during filtering updates)

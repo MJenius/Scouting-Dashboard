@@ -65,7 +65,9 @@ class ScoutNarrativeGenerator:
     def generate_scouts_take(
         self,
         player_data: pd.Series,
-        include_transfer_value: bool = False
+        include_transfer_value: bool = False,
+        use_llm: bool = False,
+        api_key: Optional[str] = None,
     ) -> Dict[str, str]:
         """
         Generate a comprehensive scout's take for a player.
@@ -73,6 +75,8 @@ class ScoutNarrativeGenerator:
         Args:
             player_data: Player row from DataFrame with all stats
             include_transfer_value: Whether to include market value analysis
+            use_llm: Whether to attempt AI generation (Google Gemini)
+            api_key: Optional API key for Gemini
             
         Returns:
             Dict with narrative sections:
@@ -80,8 +84,35 @@ class ScoutNarrativeGenerator:
                 - strengths: Key strengths analysis
                 - weaknesses: Areas for improvement
                 - recommendation: Transfer/development recommendation
-                - full_report: Complete narrative text
+                - full_report: Complete narrative text (AI or Rule-Based)
         """
+        # AI Generation Path
+        if use_llm:
+            try:
+                # Local import to avoid circular dependency
+                from .llm_integration import LLMScoutNarrativeGenerator
+                
+                llm_gen = LLMScoutNarrativeGenerator(api_key=api_key, use_llm=True)
+                if llm_gen.use_llm:
+                    ai_narrative = llm_gen.generate_narrative(player_data, include_value=include_transfer_value)
+                    
+                    # Return structure mimicking the rule-based one, but with AI text
+                    # We still generate rule-based sections for structure if needed, 
+                    # but 'full_report' is the AI one.
+                    # Or we could just return the AI text in full_report.
+                    
+                    return {
+                        'overview': "AI Generated Overview",
+                        'strengths': "AI Generated Analysis",
+                        'weaknesses': "AI Generated Analysis",
+                        'recommendation': "AI Generated Recommendation",
+                        'full_report': ai_narrative
+                    }
+            except Exception as e:
+                print(f"⚠ AI generation failed ({e}). Falling back to rule-based.")
+        
+        # Rule-Based Fallback
+        
         # Extract key data with safe defaults
         name = player_data.get('Player', 'Unknown Player')
         try:

@@ -621,32 +621,24 @@ class SimilarityEngine:
             
             sim = cosine_similarity(v1, v2)[0][0]
             
-            # Find Primary Match Drivers (Shared Excellence)
-            # We want to identify top 3 features with High Percentiles in BOTH players + Low Distance
-            
-            # 1. Get stats
+            # Find Primary Match Drivers (Lowest Weighted Distance)
+            # Identify top 3 features with the lowest weighted Euclidean distance
             distances_local = np.abs(v1 - v2).flatten()
             shared_feats_list = [features_subset[x] for x in shared_indices]
             
-            driver_scores = []
+            feature_distances = []
             for k, feat in enumerate(shared_feats_list):
-                 # Get percentiles (slow access but needed for logic)
-                 p1 = target_row.get(f"{feat}_pct", 50)
-                 p2 = row.get(f"{feat}_pct", 50)
                  dist = distances_local[k]
-                 
-                 # Same formula as calculate_feature_attribution
-                 score = (p1 + p2) - (dist * 25)
-                 driver_scores.append((feat, score))
+                 feature_distances.append((feat, dist))
             
-            # Sort by score desc
-            driver_scores.sort(key=lambda x: x[1], reverse=True)
+            # Sort by distance (lowest is best match)
+            feature_distances.sort(key=lambda x: x[1])
             
             # Pick top 3
-            top_3_feats = [x[0] for x in driver_scores[:3]]
+            top_3_feats = [x[0] for x in feature_distances[:3]]
             top_3_labels = [RADAR_LABELS.get(f, f) for f in top_3_feats]
             
-            driver_str = "Driven by " + ", ".join(top_3_labels)
+            driver_str = "Driven by " + " & ".join(top_3_labels) + " overlap"
             
             # Stylistic Twin Check (>95%)
             # We add this decoration here, but the similarity score penalty below might happen
@@ -667,7 +659,7 @@ class SimilarityEngine:
             primary_drivers.append(driver_str)
         
         search_df['Match_Score'] = np.array(final_similarities)
-        search_df['Primary_Driver'] = primary_drivers
+        search_df['Primary_Drivers'] = primary_drivers
         results = search_df[search_df.index != target_idx].sort_values('Match_Score', ascending=False)
         return results.head(top_n)
     

@@ -265,6 +265,35 @@ def clean_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
+    # Create Finishing Efficiency (Gls - xG) - New metric for Hidden Gems
+    if 'Gls/90' in df.columns and 'xG90' in df.columns:
+         df['Finishing_Efficiency'] = df['Gls/90'] - df['xG90']
+    else:
+         df['Finishing_Efficiency'] = 0.0
+
+    # -------------------------------------------------------------------------
+    # NATIONAL LEAGUE IMPUTATION (Median from League Two)
+    # -------------------------------------------------------------------------
+    print("ℹ️  Performing National League defensive imputation...")
+    defensive_metrics = ['Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90']
+    
+    # Calculate medians from League Two by position
+    league_two_mask = df['League'] == 'League Two'
+    if league_two_mask.any():
+        l2_data = df[league_two_mask]
+        l2_medians = l2_data.groupby('Primary_Pos')[defensive_metrics].median()
+        
+        # Apply to National League
+        nl_mask = df['League'] == 'National League'
+        if nl_mask.any():
+            # Vectorized approach for better performance
+            for metric in defensive_metrics:
+                if metric in df.columns:
+                    # Create a mapping series
+                    mapping = df.loc[nl_mask, 'Primary_Pos'].map(l2_medians[metric])
+                    # Fill NaNs where we have a mapping
+                    df.loc[nl_mask, metric] = df.loc[nl_mask, metric].fillna(mapping)
+
     # Impute missing values with Position-Specific League Averages (or Global Fallback)
     # This prevents "Limited Data" players from looking like failures (0s)
     # Strategy: 
@@ -545,8 +574,12 @@ def scale_features(df: pd.DataFrame) -> Tuple[np.ndarray, Dict[str, StandardScal
     scalers = {}
     
     # Outfield groups
+    # Explicit boolean mask to exclude Goalkeepers (GK) from all outfield metric calculations
+    outfield_mask = df['Primary_Pos'] != 'GK'
+    
     for pos in ['FW', 'MF', 'DF']:
-        mask = df['Primary_Pos'] == pos
+        # Combine position check with explicit outfield mask
+        mask = (df['Primary_Pos'] == pos) & outfield_mask
         if mask.any():
             scaler = StandardScaler()
             # Fill NaN with 0 ONLY for scaling

@@ -64,40 +64,58 @@ class PlayerArchetypeClusterer:
         self.archetype_profiles = {}
         self.player_archetypes = None
     
-    def optimize_k(self, k_range: range = range(5, 13)) -> int:
+    def optimize_k(self, k_range: range = range(8, 13)) -> int:
         """
-        Find optimal k using Silhouette Score.
-        Returns the k with the highest silhouette score.
+        Find optimal k using Silhouette Score with logic to handle advanced metric noise.
+        
+        Strategy:
+        - Check Baseline K=8.
+        - If Silhouette Score < 0.25 (reduced cohesion), test K=10 and K=12.
+        - Return the K that maximizes the score among candidates.
         """
         if len(self.scaled_features) < 20:
             return 3 # Fallback for tiny datasets
             
-        print(f"[Clustering] Optimizing k over range {k_range} using Silhouette Score...")
-        
-        best_k = self.n_clusters
-        best_score = -1.0
+        print(f"[Clustering] Checking cluster cohesion for K=8...")
         
         # Use a sample for speed if dataset is large
         sample_size = 3000 if len(self.scaled_features) > 5000 else None
         
-        for k in k_range:
-            # Fast fit
-            km = KMeans(n_clusters=k, random_state=self.RANDOM_STATE, n_init=3)
+        # 1. Check Baseline K=8
+        baseline_k = 8
+        best_k = baseline_k
+        best_score = -1.0
+        
+        try:
+            km = KMeans(n_clusters=baseline_k, random_state=self.RANDOM_STATE, n_init=5)
             labels = km.fit_predict(self.scaled_features)
+            best_score = silhouette_score(self.scaled_features, labels, sample_size=sample_size)
+            print(f"  K=8 Score: {best_score:.3f}")
+        except:
+             return 8
+             
+        # 2. Conditional Expansion
+        # If cohesion is low (likely due to noise from xG/xA features), try higher K
+        if best_score < 0.25:
+            print(f"⚠️  Cluster cohesion low (<0.25). Testing K=10, 12...")
             
-            try:
-                score = silhouette_score(self.scaled_features, labels, sample_size=sample_size)
-                # print(f"  k={k}: Score={score:.3f}") # Debug
-                
-                # We prefer a higher k if scores are close, to get more nuance
-                # But strict silhouette maximizes separation.
-                if score > best_score:
-                    best_score = score
-                    best_k = k
-            except:
-                pass
-                
-        print(f"✓ Optimal k determined: {best_k} (Silhouette: {best_score:.3f})")
+            comparison_ks = [10, 12]
+            for k in comparison_ks:
+                try:
+                    km = KMeans(n_clusters=k, random_state=self.RANDOM_STATE, n_init=3)
+                    labels = km.fit_predict(self.scaled_features)
+                    score = silhouette_score(self.scaled_features, labels, sample_size=sample_size)
+                    print(f"  K={k} Score: {score:.3f}")
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_k = k
+                except:
+                    pass
+        else:
+            print("✓ Cluster cohesion is healthy.")
+
+        print(f"✓ Selected K={best_k} (Silhouette: {best_score:.3f})")
         return best_k
     
     def fit(self, df: pd.DataFrame, optimize: bool = True) -> 'PlayerArchetypeClusterer':
@@ -158,8 +176,8 @@ class PlayerArchetypeClusterer:
         self.player_archetypes['PCA_Y'] = pca_features[:, 1]
         explained_var = self.pca.explained_variance_ratio_.sum()
         print(f"✓ PCA explains {explained_var*100:.1f}% of variance")
-        if explained_var < 0.60:
-             print("⚠️  Warning: PCA explained variance is low. Consider 3D or t-SNE if visualization is cluttered.")
+        if explained_var < 0.65:
+             print("⚠️  Warning: PCA explained variance is low (<65%). Consider 3D or t-SNE if visualization is cluttered.")
         
         return self
     
