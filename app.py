@@ -38,6 +38,21 @@ from utils import (
 from utils.visualizations import PlotlyVisualizations
 from utils.recruitment_logic import project_to_tier
 
+# Import API client for FastAPI backend integration
+try:
+    from frontend.api_client import (
+        get_players,
+        get_player_by_id,
+        search_players as api_search_players,
+        get_similar_players as api_get_similar,
+        check_backend_health,
+        is_backend_available,
+        APIResponse,
+    )
+    API_CLIENT_AVAILABLE = True
+except ImportError:
+    API_CLIENT_AVAILABLE = False
+
 # ============================================================================
 # PAGE CONFIGURATION
 # ============================================================================
@@ -85,6 +100,15 @@ if 'filters' not in st.session_state:
 
 if 'page' not in st.session_state:
     st.session_state.page = '🔍 Player Search'
+
+# Track backend availability
+if 'backend_available' not in st.session_state:
+    st.session_state.backend_available = False
+    if API_CLIENT_AVAILABLE:
+        try:
+            st.session_state.backend_available = is_backend_available()
+        except:
+            st.session_state.backend_available = False
 
 # ============================================================================
 # DATA LOADING (CACHED)
@@ -196,6 +220,33 @@ with st.sidebar:
             st.metric("Avg Goals/90", f"{filtered['Gls/90'].mean():.2f}")
 
     st.divider()
+    
+    # Backend connection status indicator
+    st.subheader("🔌 API Status")
+    if API_CLIENT_AVAILABLE and st.session_state.backend_available:
+        st.success("✅ FastAPI Backend Connected")
+        try:
+            health_ok, health_data = check_backend_health()
+            if health_ok:
+                st.caption(f"👥 {health_data.get('player_count', '?')} players in DB")
+                if health_data.get('engine_loaded'):
+                    st.caption("🚀 Similarity Engine: Active")
+        except:
+            pass
+    elif API_CLIENT_AVAILABLE:
+        st.warning("⚠️ Backend Unavailable")
+        st.caption("Using local fallback mode")
+        if st.button("🔄 Retry Connection", key='retry_backend'):
+            try:
+                st.session_state.backend_available = is_backend_available()
+                st.rerun()
+            except:
+                pass
+    else:
+        st.info("📦 Running in Local Mode")
+        st.caption("API client not installed")
+    
+    st.divider()
     if st.button("🔄 Reset Cache & Reload Data", use_container_width=True):
         st.cache_data.clear()
         st.session_state.data_loaded = False
@@ -269,12 +320,27 @@ if st.session_state.page == '🔍 Player Search':
         )
     
     if search_input:
-        # Get suggestions
-        suggestions = engine.get_player_suggestions(
-            search_input,
-            league=search_league if search_league != 'all' else 'all',
-            limit=10
-        )
+        # Get suggestions - Use API if available, fallback to local engine
+        suggestions = None
+        
+        if API_CLIENT_AVAILABLE and st.session_state.backend_available:
+            # Try API first (cached via @st.cache_data in api_client)
+            api_response = api_search_players(
+                query=search_input,
+                league=search_league if search_league != 'all' else 'all',
+                limit=10
+            )
+            if api_response.success and api_response.data:
+                # Convert API response to local format [(name, score), ...]
+                suggestions = [(item['name'], item['score']) for item in api_response.data]
+        
+        # Fallback to local engine if API failed or unavailable
+        if suggestions is None:
+            suggestions = engine.get_player_suggestions(
+                search_input,
+                league=search_league if search_league != 'all' else 'all',
+                limit=10
+            )
         
         if suggestions:
             # Create selectbox from suggestions
@@ -606,12 +672,52 @@ if st.session_state.page == '🔍 Player Search':
                 with col2:
                     use_weights = st.checkbox("Use position weights", value=True, key='use_weights')
                 
-                similar = engine.find_similar_players(
-                    selected_player,
-                    league=similarity_league if similarity_league != 'all' else 'all',
-                    top_n=5,
-                    use_position_weights=use_weights
-                )
+                similar = None
+                player_db_id = None
+                
+                # Try API first if available (server-side similarity calculation)
+                if API_CLIENT_AVAILABLE and st.session_state.backend_available:
+                    # We need the player's database ID for API call
+                    # Search for this player to get their ID
+                    search_response = api_search_players(
+                        query=selected_player.split(' (')[0],  # Get name part
+                        league='all',
+                        limit=1
+                    )
+                    if search_response.success and search_response.data:
+                        player_db_id = search_response.data[0].get('id')
+                    
+                    if player_db_id:
+                        api_response = api_get_similar(
+                            player_id=player_db_id,
+                            league=similarity_league if similarity_league != 'all' else 'all',
+                            top_n=5,
+                            use_position_weights=use_weights
+                        )
+                        if api_response.success and api_response.data:
+                            # Convert API response to DataFrame format for UI compatibility
+                            matches = api_response.data.get('matches', [])
+                            if matches:
+                                similar = pd.DataFrame([{
+                                    'Player': m['name'],
+                                    'Squad': m['squad'],
+                                    'League': m['league'],
+                                    'Primary_Pos': m['position'],
+                                    'Match_Score': m['match_score'],
+                                    'Primary_Drivers': m.get('primary_drivers', ''),
+                                    'Gls/90': m['stats'].get('Gls/90', 0),
+                                    'Ast/90': m['stats'].get('Ast/90', 0),
+                                    'Age': m['stats'].get('Age', 0),
+                                } for m in matches])
+                
+                # Fallback to local engine if API failed or unavailable
+                if similar is None:
+                    similar = engine.find_similar_players(
+                        selected_player,
+                        league=similarity_league if similarity_league != 'all' else 'all',
+                        top_n=5,
+                        use_position_weights=use_weights
+                    )
                 
                 if similar is not None:
                     # Show position-appropriate columns
@@ -1196,15 +1302,50 @@ elif st.session_state.page == '💎 Hidden Gems':
             st.write(f"Finding **{priority}** profiles in **{target_league}** similar to **{benchmark_name}**...")
             
             try:
-                # Use engine to find similar players
-                results = engine.find_similar_players(
-                    target_player=benchmark_name, 
-                    league=target_league,
-                    top_n=20,
-                    use_position_weights=True,
-                    scouting_priority=priority,
-                    target_league_tier=LEAGUE_TO_TIER.get(target_league)
-                )
+                results = None
+                
+                # Try API first if available
+                if API_CLIENT_AVAILABLE and st.session_state.backend_available:
+                    # Get benchmark player's database ID
+                    search_response = api_search_players(
+                        query=benchmark_name,
+                        league='all',
+                        limit=1
+                    )
+                    if search_response.success and search_response.data:
+                        benchmark_id = search_response.data[0].get('id')
+                        if benchmark_id:
+                            api_response = api_get_similar(
+                                player_id=benchmark_id,
+                                league=target_league,
+                                top_n=20,
+                                use_position_weights=True,
+                                scouting_priority=priority,
+                                target_league_tier=LEAGUE_TO_TIER.get(target_league)
+                            )
+                            if api_response.success and api_response.data:
+                                matches = api_response.data.get('matches', [])
+                                if matches:
+                                    results = pd.DataFrame([{
+                                        'Player': m['name'],
+                                        'Squad': m['squad'],
+                                        'League': m['league'],
+                                        'Age': m['stats'].get('Age', 0),
+                                        'Match_Score': m['match_score'],
+                                        'Primary_Drivers': m.get('primary_drivers', ''),
+                                        'Proxy_Warnings': api_response.data.get('proxy_warnings', ''),
+                                    } for m in matches])
+                
+                # Fallback to local engine
+                if results is None:
+                    results = engine.find_similar_players(
+                        target_player=benchmark_name, 
+                        league=target_league,
+                        top_n=20,
+                        use_position_weights=True,
+                        scouting_priority=priority,
+                        target_league_tier=LEAGUE_TO_TIER.get(target_league)
+                    )
                 
                 if results is not None and not results.empty:
                     st.success(f"Found {len(results)} matches!")
