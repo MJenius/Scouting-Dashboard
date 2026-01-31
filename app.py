@@ -1103,6 +1103,13 @@ elif st.session_state.page == '💎 Hidden Gems':
             )
         
         # Apply filters
+        # Ensure Finishing_Efficiency exists (patch for cached data)
+        if 'Finishing_Efficiency' not in df.columns:
+            if 'Gls/90' in df.columns and 'xG90' in df.columns:
+                 df['Finishing_Efficiency'] = df['Gls/90'] - df['xG90']
+            else:
+                 df['Finishing_Efficiency'] = 0.0
+                 
         gems = df[
             (df['Gls/90'] >= min_goals) &
             (df['Ast/90'] >= min_assists) &

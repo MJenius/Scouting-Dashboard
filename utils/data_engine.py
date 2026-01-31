@@ -464,9 +464,17 @@ def calculate_position_percentiles(df: pd.DataFrame) -> pd.DataFrame:
                     pct_col = f'{feature}_pct'
                     quality_col = f'{feature}_pct_quality'
                     
-                    df.loc[mask, pct_col] = (
-                        df.loc[mask, feature].rank(pct=True, na_option='bottom') * 100
-                    )
+                    # Handle metrics where "Lower is Better"
+                    if feature in ['Fls/90']:
+                         df.loc[mask, pct_col] = (
+                            100 - (df.loc[mask, feature].rank(pct=True, na_option='bottom') * 100)
+                        )
+                    else:
+                        # Higher is better (Standard)
+                        df.loc[mask, pct_col] = (
+                            df.loc[mask, feature].rank(pct=True, na_option='bottom') * 100
+                        )
+                    
                     df.loc[mask, quality_col] = quality
             
             # Goalkeepers: Use GK_FEATURE_COLUMNS
