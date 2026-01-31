@@ -1,463 +1,261 @@
 """
-constants.py - Global configuration and feature definitions for the Scouting Dashboard.
+constants.py - Configuration constants for the Scouting Dashboard.
 
-This module defines:
-- Feature columns for per-90 statistics
-- League metadata and color schemes
-- Position types and archetype definitions
-- League-specific metric availability maps
+Includes:
+- Feature columns (Outfield & GK)
+- League definitions and colors
+- Archetype definitions
+- Scoring weights
+- League Tiers and Metric Availability
 """
 
 # ============================================================================
-# CORE FEATURES: Per-90 Metrics used for player analysis
+# 1. FEATURES & COLUMNS
 # ============================================================================
+
+# The core 13 metrics used for outfield analysis (Tier 1 standard)
 FEATURE_COLUMNS = [
-    'Gls/90',    # Goals per 90 minutes
-    'Ast/90',    # Assists per 90 minutes
-    'Sh/90',     # Shots per 90 minutes
-    'SoT/90',    # Shots on Target per 90 minutes
-    'Crs/90',    # Crosses per 90 minutes
-    'Int/90',    # Interceptions per 90 minutes
-    'TklW/90',   # Tackles Won per 90 minutes
-    'Fls/90',    # Fouls Committed per 90 minutes
-    'Fld/90',    # Fouls Drawn per 90 minutes
-    'xG90',      # Expected Goals per 90 minutes
-    'xA90',      # Expected Assists per 90 minutes
-    'xGChain90', # Possession involvement per 90 minutes
-    'xGBuildup90', # Buildup contribution per 90 minutes
+    'Gls/90', 'Ast/90', 'xG90', 'xA90', 
+    'Sh/90', 'SoT/90', 'Crs/90', 'Drib/90', 
+    'TklW/90', 'Int/90', 'Fls/90', 'Fld/90', 
+    'AerWon/90'
 ]
 
-# Goalkeeper-specific features (for comparison when both players are GK)
+# Supplementary columns that strictly relate to possession/progression
+POSSESSION_FEATURES = ['PrgC', 'PrgP', 'Drib/90']
+OFFENSIVE_FEATURES = ['Gls/90', 'Ast/90', 'xG90', 'xA90', 'Sh/90', 'SoT/90']
+
+# Goalkeeper-specific metrics
 GK_FEATURE_COLUMNS = [
-    'GA90',      # Goals Against per 90 minutes
-    'Save%',     # Save percentage
-    'CS%',       # Clean Sheet percentage
-    'W',         # Wins
-    'D',         # Draws
-    'L',         # Losses
-    'PKsv',      # Penalty kicks saved
-    'PKm',       # Penalty kicks missed
-    'Saves',     # Total saves
+    'PSxG+/-', 'Save%', 'CS%', 'GA90', 'L', 
+    'CrsStp%', 'Swp/90', 'Launch%', 'PassLen'
 ]
 
-# Grouping for readability in UI
-OFFENSIVE_FEATURES = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'xG90', 'xA90']
-POSSESSION_FEATURES = ['Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90', 'xGChain90', 'xGBuildup90']
+# ============================================================================
+# 2. LEAGUES & POSITIONS
+# ============================================================================
 
-# ============================================================================
-# LEAGUE METADATA
-# ============================================================================
 LEAGUES = [
     'Premier League',
+    'La Liga',
+    'Bundesliga', 
+    'Serie A',
+    'Ligue 1',
     'Championship',
     'League One',
     'League Two',
-    'National League',
-    'Bundesliga',
-    'La Liga',
-    'Serie A',
-    'Ligue 1'
+    'National League'
 ]
 
-# League hierarchy and tier assignment
+LOW_DATA_LEAGUES = ['National League']
+HIDDEN_GEMS_EXCLUDE_LEAGUE = ['Premier League']
+
+PRIMARY_POSITIONS = ['FW', 'AM', 'CM', 'DM', 'FB', 'CB', 'GK']
+
+LEAGUE_COLORS = {
+    'Premier League': '#38003c', # Purple
+    'La Liga': '#ee8707', # Orange
+    'Bundesliga': '#d3010c', # Red
+    'Serie A': '#008fd7', # Blue
+    'Ligue 1': '#dae505', # Lime
+    'Championship': '#EF3340', # Red
+    'League One': '#B2B2B2', # Silver
+    'League Two': '#7F7F7F', # Dark Gray
+    'National League': '#333333', # Black
+}
+
+# ============================================================================
+# 3. MAPPINGS & QUALITY
+# ============================================================================
+
+LEAGUE_METRIC_MAP = {
+    # Standard map for renaming if needed, currently unused but good for Ref
+}
+
+LEAGUE_DATA_QUALITY = {
+    'Premier League': 'High',
+    'La Liga': 'High',
+    'Bundesliga': 'High',
+    'Serie A': 'High',
+    'Ligue 1': 'High',
+    'Championship': 'Medium',
+    'League One': 'Medium',
+    'League Two': 'Medium',
+    'National League': 'Low'
+}
+
+# League Tiers for Data Availability (NEW)
+LEAGUE_TO_TIER = {
+    'Premier League': 'Tier 1',
+    'La Liga': 'Tier 1',
+    'Bundesliga': 'Tier 1',
+    'Serie A': 'Tier 1',
+    'Ligue 1': 'Tier 1',
+    'Championship': 'Tier 2',
+    'League One': 'Tier 3',
+    'League Two': 'Tier 3',
+    'National League': 'Tier 4'
+}
+
+# Integer Tier Mapping (for Narrative Generation)
 LEAGUE_TIERS = {
     'Premier League': 1,
+    'La Liga': 1,
+    'Bundesliga': 1,
+    'Serie A': 1,
+    'Ligue 1': 1,
     'Championship': 2,
     'League One': 3,
     'League Two': 4,
-    'National League': 5,
-    'Bundesliga': 1,
-    'La Liga': 1,
-    'Serie A': 1,
-    'Ligue 1': 1,
+    'National League': 5
 }
 
-# Color scheme for consistent visualization across dashboard
-LEAGUE_COLORS = {
-    'Premier League': '#003399',      # Dark Blue
-    'Championship': '#EE1939',        # Red
-    'League One': '#118C3B',          # Green
-    'League Two': '#002868',          # Navy
-    'National League': '#9B59B6',     # Purple
-    'Bundesliga': '#D3010C',          # Red/Black
-    'La Liga': '#FF6900',             # Orange
-    'Serie A': '#024494',             # Blue
-    'Ligue 1': '#003D7C',             # Dark Blue
+# Define what metrics exist in which tier
+LEAGUE_METRIC_AVAILABILITY = {
+    'Tier 1': ['Gls/90', 'Ast/90', 'xG90', 'xA90', 'Sh/90', 'SoT/90', 'Crs/90', 'Drib/90', 'TklW/90'],  # Top 5 Leagues
+    'Tier 2': ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'CrdY', 'CrdR'],  # Championship
+    'Tier 3': ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'CrdY', 'CrdR'],  # League One/Two
+    'Tier 4': ['Gls/90', 'Ast/90', 'CrdY', 'CrdR']  # National League
 }
 
-# ============================================================================
-# POSITION DEFINITIONS
-# ============================================================================
-POSITION_TYPES = {
-    'FW': 'Forward',
-    'MF': 'Midfielder',
-    'DF': 'Defender',
-    'GK': 'Goalkeeper',
+# Metric Proxies
+METRIC_PROXIES = {
+    'xG90': ('Gls/90', 'Using raw Goals instead of xG'),
+    'xA90': ('Ast/90', 'Using raw Assists instead of xA'),
+    'Crs/90': ('Ast/90', 'Using Assists as proxy for Crossing volume'),
+    'Drib/90': ('Gls/90', 'Using Goal Threat as proxy for Dribbling ability (Low Confidence)'),
+    'TklW/90': ('CrdY', 'Using Card history as proxy for Aggression (High Risk Proxy)'),
 }
 
-# Primary positions (used for percentile grouping)
-PRIMARY_POSITIONS = ['FW', 'MF', 'DF', 'GK']
-
-# ============================================================================
-# LEAGUE-METRIC AVAILABILITY MAP
-# Decision (B): League-aware metric availability for completeness scoring
-# ============================================================================
-LEAGUE_METRIC_MAP = {
-    'Premier League': FEATURE_COLUMNS,           # All 13 metrics
-    'Championship': ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90'],
-    'League One': ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90'],
-    'League Two': ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90'],
-    'National League': ['Gls/90', 'Ast/90'],    # Only attacking metrics tracked
-    'Bundesliga': FEATURE_COLUMNS,               # All 13 metrics
-    'La Liga': FEATURE_COLUMNS,                  # All 13 metrics
-    'Serie A': FEATURE_COLUMNS,                  # All 13 metrics
-    'Ligue 1': FEATURE_COLUMNS,                  # All 13 metrics
+SCOUTING_PRIORITIES = {
+    'Standard': {}, # Uses default weights
+    'Clinical Finisher': {'Gls/90': 3.0, 'xG90': 2.0, 'Sh/90': 1.5},
+    'Creative Hub': {'Ast/90': 3.0, 'xA90': 2.0},
+    'Ball Progressor': {'Drib/90': 3.0, 'PrgC': 2.0},
+    'Aerial Threat': {'AerWon/90': 3.0}
 }
 
-# Leagues with limited data tracking (e.g. only goals/assists)
-LOW_DATA_LEAGUES = ['National League']
-
-# Detailed explanation of data availability per league
-LEAGUE_DATA_QUALITY = {
-    'Premier League': {
-        'tier': 1,
-        'data_completeness': 'Full',
-        'defensive_stats': True,
-        'shooting_stats': True,
-        'sample_size': 'Large',
-    },
-    'Championship': {
-        'tier': 2,
-        'data_completeness': 'Full',
-        'defensive_stats': True,
-        'shooting_stats': True,
-        'sample_size': 'Large',
-    },
-    'League One': {
-        'tier': 3,
-        'data_completeness': 'Full',
-        'defensive_stats': True,
-        'shooting_stats': True,
-        'sample_size': 'Medium',
-    },
-    'League Two': {
-        'tier': 4,
-        'data_completeness': 'Full',
-        'defensive_stats': True,
-        'shooting_stats': True,
-        'sample_size': 'Medium',
-    },
-    'National League': {
-        'tier': 5,
-        'data_completeness': 'Partial',
-        'defensive_stats': False,
-        'shooting_stats': False,
-        'sample_size': 'Small',
-        'note': 'Defensive metrics not tracked at this tier',
-    },
-    'Bundesliga': {
-        'tier': 1,
-        'data_completeness': 'Full',
-        'defensive_stats': True,
-        'shooting_stats': True,
-        'sample_size': 'Large',
-    },
-    'La Liga': {
-        'tier': 1,
-        'data_completeness': 'Full',
-        'defensive_stats': True,
-        'shooting_stats': True,
-        'sample_size': 'Large',
-    },
-    'Serie A': {
-        'tier': 1,
-        'data_completeness': 'Full',
-        'defensive_stats': True,
-        'shooting_stats': True,
-        'sample_size': 'Large',
-    },
-    'Ligue 1': {
-        'tier': 1,
-        'data_completeness': 'Full',
-        'defensive_stats': True,
-        'shooting_stats': True,
-        'sample_size': 'Large',
-    },
-}
 
 # ============================================================================
-# PLAYER ARCHETYPE DEFINITIONS
-# K-Means clustering will assign players to one of 8 archetypes
+# 4. ARCHETYPES
 # ============================================================================
+
+ARCHETYPE_NAMES = [
+    'Target Man', 'Creative Playmaker', 'Box-to-Box', 
+    'Ball-Winning Midfielder', 'Aggressive Defender', 'Sweeper', 
+    'Full-Back Playmaker', 'Buildup Boss', 
+    'Elite Keeper', 'Shot-Stopper', 'Ball-Playing GK'
+]
+
+# Definitions for clustering logic and visualization
 ARCHETYPES = {
     'Target Man': {
-        'description': 'Tall, physical forward. High aerial dominance, strong in hold-up play.',
+        'description': 'Aerial dominant forward who holds up play',
+        'color': '#ff0000',
         'primary_position': 'FW',
-        'key_metrics': ['Gls/90', 'Fld/90'],
-        'color': '#E74C3C',  # Red
+        'key_metrics': ['AerWon/90', 'Gls/90']
     },
     'Creative Playmaker': {
-        'description': 'Dynamic midfielder. High pass completion, creative passing range.',
+        'description': 'Creator who operates in the half-spaces',
+        'color': '#00ff00',
         'primary_position': 'MF',
-        'key_metrics': ['Ast/90', 'Crs/90'],
-        'color': '#3498DB',  # Blue
-    },
-    'Ball-Winning Midfielder': {
-        'description': 'Defensive midfielder. High tackle wins, interception rate.',
-        'primary_position': 'MF',
-        'key_metrics': ['TklW/90', 'Int/90'],
-        'color': '#F39C12',  # Orange
+        'key_metrics': ['Ast/90', 'xA90', 'KeyP/90']
     },
     'Box-to-Box': {
-        'description': 'Versatile midfielder. Balanced attacking and defensive contributions.',
+        'description': 'All-around midfielder contributing to both phases',
+        'color': '#0000ff',
         'primary_position': 'MF',
-        'key_metrics': ['Gls/90', 'Ast/90', 'TklW/90'],
-        'color': '#9B59B6',  # Purple
+        'key_metrics': ['TklW/90', 'Int/90', 'Gls/90']
     },
-    'Full-Back Playmaker': {
-        'description': 'Attacking full-back. High crossing and build-up play contribution.',
-        'primary_position': 'DF',
-        'key_metrics': ['Crs/90', 'Ast/90'],
-        'color': '#1ABC9C',  # Teal
+    'Ball-Winning Midfielder': {
+        'description': 'Defensive specialist who breaks up play',
+        'color': '#ffff00',
+        'primary_position': 'MF',
+        'key_metrics': ['TklW/90', 'Int/90']
     },
     'Aggressive Defender': {
-        'description': 'Aggressive defender. High tackle/interception rate, physical presence.',
+        'description': 'Proactive defender who steps out to engage',
+        'color': '#ff00ff',
         'primary_position': 'DF',
-        'key_metrics': ['TklW/90', 'Int/90'],
-        'color': '#E67E22',  # Dark Orange
+        'key_metrics': ['TklW/90', 'Int/90', 'Fls/90']
     },
     'Sweeper': {
-        'description': 'Covering defender. High interception rate, positioning-based defense.',
+        'description': 'Covering defender who cleans up behind',
+        'color': '#00ffff',
         'primary_position': 'DF',
-        'key_metrics': ['Int/90'],
-        'color': '#2C3E50',  # Dark Blue-Gray
+        'key_metrics': ['Int/90', 'Clr/90']
     },
-    # Goalkeeper Archetypes (separate clustering)
-    'Shot-Stopper': {
-        'description': 'Traditional goalkeeper. Elite shot-stopping, high save percentage.',
-        'primary_position': 'GK',
-        'key_metrics': ['Save%', 'Saves'],
-        'color': '#34495E',  # Gray
-    },
-    'Sweeper-Keeper': {
-        'description': 'Modern sweeper-keeper. Active outside box, good distribution.',
-        'primary_position': 'GK',
-        'key_metrics': ['Save%', 'CS%'],
-        'color': '#16A085',  # Teal
-    },
-    'Ball-Playing GK': {
-        'description': 'Ball-playing goalkeeper. Excellent distribution, comfortable with feet.',
-        'primary_position': 'GK',
-        'key_metrics': ['Save%', 'W'],
-        'color': '#27AE60',  # Green
-    },
-    'Elite Keeper': {
-        'description': 'All-round elite goalkeeper. Balanced across all GK metrics.',
-        'primary_position': 'GK',
-        'key_metrics': ['Save%', 'GA90', 'CS%'],
-        'color': '#8E44AD',  # Purple
+    'Full-Back Playmaker': {
+        'description': 'Wide defender who contributes to attack',
+        'color': '#ff8800',
+        'primary_position': 'DF',
+        'key_metrics': ['Crs/90', 'xA90']
     },
     'Buildup Boss': {
-        'description': 'Deep-lying playmaker vital to possession and buildup. High xGBuildup contribution.',
-        'primary_position': 'MF',
-        'key_metrics': ['xGBuildup90', 'Int/90'],
-        'color': '#2980B9', # Strong Blue
+        'description': 'Deep lying playmaker or ball-playing CB',
+        'color': '#8800ff',
+        'primary_position': 'MF', # or DF
+        'key_metrics': ['PrgP', 'PassComp%']
     },
-}
-
-
-ARCHETYPE_NAMES = list(ARCHETYPES.keys())
-
-# ============================================================================
-# POSITION-SPECIFIC WEIGHT MATRIX
-# Used for weighted cosine similarity in player comparisons
-# Higher weights = more important for similarity calculation
-# ============================================================================
-PROFILE_WEIGHTS = {
-    'Attacker': {
-        'Gls/90': 5.0,    # Goals are critical for attackers
-        'Ast/90': 2.0,    # Assists matter but less than goals
-        'Sh/90': 3.5,     # Shot volume is very important
-        'SoT/90': 3.0,    # Shot accuracy is very important
-        'Crs/90': 1.2,    # Crosses matter for some attackers
-        'Int/90': 0.2,    # Defensive stats matter very little
-        'TklW/90': 0.3,   # Defensive stats matter very little
-        'Fls/90': 0.8,    # Discipline has some relevance
-        'Fld/90': 1.5,    # Drawing fouls is relevant (dribbling)
-        'xG90': 4.5,      # High weight for Expected Goals
-        'xA90': 2.5,      # High weight for Expected Assists
-        'xGChain90': 1.0,
-        'xGBuildup90': 0.5,
+    'Elite Keeper': {
+        'description': 'Top tier shot-stopper',
+        'color': '#ffffff',
+        'primary_position': 'GK',
+        'key_metrics': ['PSxG+/-']
     },
-    'Midfielder': {
-        'Gls/90': 1.0,    # Goals matter but not primary
-        'Ast/90': 3.5,    # Assists are critical for midfielders
-        'Sh/90': 1.2,     # Shot volume matters moderately
-        'SoT/90': 1.0,    # Shot accuracy matters moderately
-        'Crs/90': 2.5,    # Crossing is very important
-        'Int/90': 2.0,    # Defensive contribution important
-        'TklW/90': 2.2,   # Tackling is very important
-        'Fls/90': 1.5,    # Discipline matters
-        'Fld/90': 1.5,    # Drawing fouls matters
-        'xG90': 1.0,
-        'xA90': 3.0,
-        'xGChain90': 2.5,   # Moderate weight to capture playmaking
-        'xGBuildup90': 2.5, # Moderate weight to capture buildup influence
+    'Shot-Stopper': {
+        'description': 'Keeper focused on saving',
+        'color': '#aaaaaa',
+        'primary_position': 'GK',
+        'key_metrics': ['Save%']
     },
-    'Defender': {
-        'Gls/90': 0.1,    # Goals matter very little for defenders
-        'Ast/90': 0.2,    # Assists matter very little
-        'Sh/90': 0.1,     # Shots matter very little
-        'SoT/90': 0.1,    # Shot accuracy irrelevant
-        'Crs/90': 0.8,    # Crossing matters for attacking full-backs
-        'Int/90': 4.0,    # Interceptions are critical
-        'TklW/90': 4.0,   # Tackles are critical
-        'Fls/90': 2.0,    # Discipline is very important
-        'Fld/90': 1.8,    # Drawing fouls matters (positioning)
-        'xG90': 0.1,
-        'xA90': 0.2,
-        'xGChain90': 1.5,
-        'xGBuildup90': 2.0,
-    },
-    'Goalkeeper': {
-        'GA90': 2.5,      # Goals Against per 90 (lower is better)
-        'Save%': 3.0,     # Save percentage (higher is better)
-        'CS%': 2.0,       # Clean sheet percentage
-        'W': 1.5,         # Wins
-        'D': 1.0,         # Draws
-        'L': 0.5,         # Losses (lower is better)
-        'PKsv': 1.5,      # Penalty saves
-        'PKm': 1.0,       # Penalty saves made
-        'Saves': 1.0,     # Total saves
-    },
-}
-
-
-# ============================================================================
-# PERCENTILE QUALITY FLAGS
-# Decision (B): Low sample size handling for percentile reliability
-# ============================================================================
-PERCENTILE_QUALITY_THRESHOLDS = {
-    'High': 30,      # >= 30 players in position-league group
-    'Medium': 10,    # 10-29 players
-    'Low': 0,        # < 10 players (flagged for caution)
+    'Ball-Playing GK': {
+        'description': 'Keeper comfortable with feet',
+        'color': '#333333',
+        'primary_position': 'GK',
+        'key_metrics': ['Launch%']
+    }
 }
 
 # ============================================================================
-# DATA VALIDATION THRESHOLDS
+# 5. UI CONFIG
 # ============================================================================
-MIN_MINUTES_PLAYED = 10  # Minimum 90s for statistical reliability
-MIN_PLAYERS_PER_GROUP = 5  # Minimum players in position-league group for percentiles
-DATA_COMPLETENESS_WARNING = 30  # Warn if player has < 30% completeness score
 
-# ============================================================================
-# UI/UX CONFIGURATION
-# ============================================================================
-PAGE_TITLES = {
-    '1_🔍_Player_Search': 'Player Search',
-    '2_⚔️_Head_to_Head': 'Head-to-Head Comparison',
-    '3_💎_Hidden_Gems': 'Hidden Gems Discovery',
-    '4_🏆_Leaderboards': 'League Leaderboards',
-}
-
-# Color scheme for completeness and percentile visualization
-COMPLETENESS_COLORS = {
-    'high': '#27AE60',    # Green (>70%)
-    'medium': '#F39C12',  # Orange (30-70%)
-    'low': '#E74C3C',     # Red (<30%)
-}
-
-PERCENTILE_COLORS = {
-    'elite': '#C0392B',       # Dark Red (>90th percentile)
-    'excellent': '#E74C3C',   # Red (80-90th)
-    'very_good': '#F39C12',   # Orange (60-80th)
-    'good': '#3498DB',        # Blue (40-60th)
-    'below_average': '#95A5A6', # Gray (20-40th)
-    'poor': '#7F8C8D',        # Dark Gray (<20th)
-}
-
-# ============================================================================
-# HIDDEN GEMS CONFIGURATION
-# ============================================================================
-HIDDEN_GEMS_AGE_THRESHOLD = 23  # Max age for "young prospect"
-HIDDEN_GEMS_PERCENTILE_THRESHOLD = 80  # Min percentile for "high priority"
-HIDDEN_GEMS_EXCLUDE_LEAGUE = 'Premier League'  # Don't flag PL players as hidden gems
-
-# ============================================================================
-# TRANSFER RECOMMENDATION TIERS
-# ============================================================================
-TRANSFER_PRIORITY_TIERS = {
-    'Elite': {
-        'percentile_min': 90,
-        'age_max': 25,
-        'icon': '🌟',
-        'color': '#E74C3C',
-    },
-    'High': {
-        'percentile_min': 80,
-        'age_max': 23,
-        'icon': '⭐',
-        'color': '#F39C12',
-    },
-    'Medium': {
-        'percentile_min': 70,
-        'age_max': 21,
-        'icon': '✓',
-        'color': '#3498DB',
-    },
-}
-
-# ============================================================================
-# METRIC TOOLTIPS & HELP TEXT
-# Displayed in UI to help scouts understand each statistic
-# ============================================================================
 METRIC_TOOLTIPS = {
-    'Gls/90': 'Goals scored per 90 minutes played. Key metric for forwards and attacking midfielders.',
-    'Ast/90': 'Assists per 90 minutes. Measures creative output and goal-creating ability.',
-    'Sh/90': 'Shots taken per 90 minutes. Indicates offensive involvement and risk-taking.',
-    'SoT/90': 'Shots on target per 90 minutes. Higher accuracy/quality shot selection.',
-    'Crs/90': 'Crosses delivered per 90 minutes. Critical for attacking players and set-piece specialists.',
-    'Int/90': 'Interceptions per 90 minutes. Shows defensive positioning and reading of the game.',
-    'TklW/90': 'Tackles won per 90 minutes. Direct tackle success. Lower than total tackles.',
-    'Fls/90': 'Fouls committed per 90 minutes. Discipline indicator—higher fouls suggests physical play.',
-    'Fld/90': 'Fouls drawn per 90 minutes. Shows dribbling ability and how opponents react.',
-    'xG90': 'Expected Goals per 90 minutes. Measures the quality of chances a player is involved in.',
-    'xA90': 'Expected Assists per 90 minutes. Measures the quality of chances created for teammates.',
-    'xGChain90': 'Expected Goals Chain per 90. Measures total xG of every possession a player is involved in.',
-    'xGBuildup90': 'Expected Goals Buildup per 90. Measures xG of possessions a player is involved in, excluding shots and key passes.',
-    'GA90': 'Goals against per 90 minutes (Goalkeepers). Lower is better. Affected by defense quality.',
-    'Save%': 'Save percentage (Goalkeepers). Ratio of shots stopped to shots faced. Elite GKs: 70%+.',
-    'CS%': 'Clean sheet percentage (Goalkeepers). Percentage of matches with zero goals conceded.',
-    'Age': 'Player age. Peak performance typically 25-28 years old.',
-    '90s': 'Total 90-minute equivalents played in season. Higher = more data reliability.',
-    'Squad': 'Current club/team.',
-    'League': 'Top-level league (PL, Championship, Bundesliga, etc.).',
+    'Gls/90': 'Goals per 90 minutes',
+    'Ast/90': 'Assists per 90 minutes',
+    'xG90': 'Expected Goals per 90',
+    'xA90': 'Expected Assists per 90'
 }
 
-# ============================================================================
-# RADAR CHART LABELS: Human-readable labels for visualizations
-# ============================================================================
+PROFILE_WEIGHTS = {
+    # Generic Profile Weights (used by similarity engine)
+    'Attacker': {'Gls/90': 2.0, 'xG90': 2.0, 'Sh/90': 1.5},
+    'Midfielder': {'Ast/90': 1.5, 'xA90': 1.5, 'TklW/90': 1.2},
+    'Defender': {'TklW/90': 2.0, 'Int/90': 2.0, 'AerWon/90': 1.5},
+    
+    # Specific Overrides (if needed)
+    'FW': {'Gls/90': 2.0, 'xG90': 2.0},
+    'AM': {'Ast/90': 2.0, 'xA90': 2.0},
+    'CB': {'Int/90': 2.0, 'AerWon/90': 1.5},
+    'GK': {'PSxG+/-': 3.0, 'Save%': 2.0}
+}
+
+# Threshold constants from data engine
+MIN_MINUTES_PLAYED = 10.0
+MIN_PLAYERS_PER_GROUP = 5
+PERCENTILE_QUALITY_THRESHOLDS = {
+    'High': 50,
+    'Medium': 20,
+    'Low': 0
+}
+
+# Radar chart labels
 RADAR_LABELS = {
     'Gls/90': 'Goals',
     'Ast/90': 'Assists',
-    'Sh/90': 'Shots',
-    'SoT/90': 'Shot Accuracy',
-    'Crs/90': 'Crossing',
-    'Int/90': 'Interceptions',
-    'TklW/90': 'Tackles Won',
-    'Fls/90': 'Fouls Committed',
-    'Fld/90': 'Fouls Drawn',
-    'xG90': 'Expected Goals',
-    'xA90': 'Expected Assists',
-    'xGChain90': 'Possession Involvement',
-    'xGBuildup90': 'Buildup Contribution',
-    'GA90': 'Goals Against/90',
-    'Save%': 'Save %',
-    'CS%': 'Clean Sheets %',
-    'W': 'Wins',
-    'D': 'Draws',
-    'L': 'Losses',
-    'PKsv': 'Penalties Saved',
-    'PKm': 'Penalties Made',
-    'Saves': 'Total Saves',
+    'xG90': 'xG',
+    'xA90': 'xA',
+    'TklW/90': 'Tackles',
+    'Int/90': 'Intercepts'
 }

@@ -17,6 +17,9 @@ from .constants import (
     METRIC_TOOLTIPS,
     LOW_DATA_LEAGUES,
     HIDDEN_GEMS_EXCLUDE_LEAGUE,
+    LEAGUE_TO_TIER,
+    SCOUTING_PRIORITIES,
+    METRIC_PROXIES,
 )
 
 from .data_engine import (
@@ -76,6 +79,9 @@ __all__ = [
     'METRIC_TOOLTIPS',
     'LOW_DATA_LEAGUES',
     'HIDDEN_GEMS_EXCLUDE_LEAGUE',
+    'LEAGUE_TO_TIER',
+    'SCOUTING_PRIORITIES',
+    'METRIC_PROXIES',
     # Data Engine
     'load_data',
     'process_all_data',

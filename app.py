@@ -30,10 +30,13 @@ from utils import (
     METRIC_TOOLTIPS,
     LOW_DATA_LEAGUES,
     HIDDEN_GEMS_EXCLUDE_LEAGUE,
+    SCOUTING_PRIORITIES,
+    LEAGUE_TO_TIER,
 
     generate_narrative_for_player,
 )
 from utils.visualizations import PlotlyVisualizations
+from utils.recruitment_logic import project_to_tier
 
 # ============================================================================
 # PAGE CONFIGURATION
@@ -379,7 +382,6 @@ if st.session_state.page == '🔍 Player Search':
                             with st.spinner("Generating AI-powered scouting report..."):
                                 narrative = generate_llm_narrative(
                                     player_data,
-                                    include_value=True,
                                     use_llm=True
                                 )
                             
@@ -387,7 +389,7 @@ if st.session_state.page == '🔍 Player Search':
                             st.markdown(narrative)
                         else:
                             # Use rule-based generation
-                            narrative = generate_narrative_for_player(player_data, include_value=True)
+                            narrative = generate_narrative_for_player(player_data)
                             st.info("📋 Rule-Based Report")
                             st.markdown(narrative)
                     except RuntimeError as e:
@@ -789,7 +791,7 @@ if st.session_state.page == '🔍 Player Search':
                                 import os
                                 
                                 # Generate narrative using LLM
-                                narrative = generate_llm_narrative(player_data, include_value=True)
+                                narrative = generate_llm_narrative(player_data)
                                 
                                 # Create temp PDF file using a more robust method to avoid WinError 32
                                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -973,7 +975,7 @@ elif st.session_state.page == '⚔️ Head-to-Head':
                         p2_data = df[df['Player'] == player2].iloc[0]
                         
                         # Generate narrative for comparison
-                        narrative = generate_llm_narrative(p1_data, include_value=True)
+                        narrative = generate_llm_narrative(p1_data)
                         narrative += f"\n\n**H2H ANALYSIS**: {player1} vs {player2}"
                         narrative += f"\nMatch Score: {comparison['match_score']:.1f}%"
                         narrative += "\nThis comparison identifies the stylistic overlap and performance gaps between these two profiles."
@@ -1025,130 +1027,220 @@ elif st.session_state.page == '⚔️ Head-to-Head':
 
 elif st.session_state.page == '💎 Hidden Gems':
     st.header("💎 Hidden Gems Discovery")
-    st.write("Discover young, high-performing players with excellent price-to-performance ratios")
+    st.write("Discover high-efficiency outliers and unique profiles.")
     
-    # Add tab selection
-    # Results View
-    with st.container():
-        st.subheader("🔍 Performance Filters")
-        # Metric sliders
-        st.subheader("⚙️ Filter Criteria")
-        
-        col1, col2, col3 = st.columns(3)
-        
+    # Mode Selection
+    search_mode = st.radio(
+        "Search Mode:",
+        ["🚀 Discovery (Filters)", "🎯 Benchmark (Player Match)"], 
+        horizontal=True,
+        help="Choose between filtering by metrics or finding players similar to a benchmark player."
+    )
+    
+    st.divider()
+
+    if search_mode == "🚀 Discovery (Filters)":
+        # -------------------------------------------------------------------------
+        # EXISTING DISCOVERY LOGIC
+        # -------------------------------------------------------------------------
+        col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
-            min_goals = st.slider(
-                "Min Goals/90:",
-                0.0, 2.0, 0.3, step=0.1, key='gems_goals',
-                help=METRIC_TOOLTIPS.get('Gls/90', "Minimum goals per 90 minutes.")
-            )
-        
+            exclude_pl = st.checkbox("Exclude Premier League", value=True, help="Focus on lower leagues/abroad.")
         with col2:
-            min_assists = st.slider(
-                "Min Assists/90:",
-                0.0, 1.0, 0.1, step=0.05, key='gems_assists',
-                help=METRIC_TOOLTIPS.get('Ast/90', "Minimum assists per 90 minutes.")
-            )
-        
+            use_step_up = st.toggle("🚀 Step-Up Projection", help="Apply penalty to non-PL stats to estimate PL quality.")
         with col3:
-            max_age = st.slider(
-                "Max Age:",
-                15, 30, 23, key='gems_age',
-                help="Maximum player age for hidden gems search."
-            )
-        
-        # Add advanced stat filters for Hidden Gems
-        col1, col2 = st.columns(2)
-        with col1:
-            min_xg = st.slider(
-                "Min xG90:",
-                0.0, 1.0, 0.0, step=0.05, key='gems_xg',
-                help=METRIC_TOOLTIPS.get('xG90', "Minimum expected goals per 90.")
-            )
-        with col2:
-            min_xa = st.slider(
-                "Min xA90:",
-                0.0, 1.0, 0.0, step=0.05, key='gems_xa',
-                help=METRIC_TOOLTIPS.get('xA90', "Minimum expected assists per 90.")
-            )
-            
-        with col3:
-            min_fin_eff = st.slider(
-                "Min Finishing Eff:",
-                -0.5, 1.0, 0.0, step=0.05, key='gems_fin_eff',
-                help="Finishing Efficiency (Goals - xG). Positive values indicate clinical finishing overperformance."
-            )
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            min_percentile = st.slider(
-                "Min Percentile:",
-                0, 100, 75, step=5, key='gems_percentile',
-                help="Minimum percentile for goals/90 (relative to position/league)."
-            )
-        
-        with col2:
-            exclude_pl = st.checkbox(
-                "Exclude Premier League",
-                value=True, key='gems_exclude_pl',
-                help="Exclude Premier League players from hidden gems (focus on undervalued leagues)."
-            )
-        
-        with col3:
-            min_games = st.slider(
-                "Min 90s:",
-                0.0, 30.0, 1.0, step=0.5, key='gems_games',
-                help=METRIC_TOOLTIPS.get('90s', "Minimum full matches played (90s) for reliability.")
-            )
-        
-        # Apply filters
-        # Ensure Finishing_Efficiency exists (patch for cached data)
-        if 'Finishing_Efficiency' not in df.columns:
-            if 'Gls/90' in df.columns and 'xG90' in df.columns:
-                 df['Finishing_Efficiency'] = df['Gls/90'] - df['xG90']
-            else:
-                 df['Finishing_Efficiency'] = 0.0
-                 
-        gems = df[
-            (df['Gls/90'] >= min_goals) &
-            (df['Ast/90'] >= min_assists) &
-            (df['xG90'] >= min_xg) &
-            (df['xA90'] >= min_xa) &
-            (df['Finishing_Efficiency'] >= min_fin_eff) &
-            (df['Age'] <= max_age) &
-            (df['Gls/90_pct'] >= min_percentile) &
-            (df['90s'] >= min_games)
-        ]
-        
+            pass # spacer
+
+        # Base Filtering
+        gems = st.session_state.df_clustered.copy()
         if exclude_pl:
             gems = gems[gems['League'] != 'Premier League']
-        
-        # Results
-        st.divider()
-        st.subheader(f"🎯 Results ({len(gems)} players found)")
-        
-        if len(gems) > 0:
-            # Sort by goals/90 percentile descending
-            gems_sorted = gems.sort_values('Gls/90_pct', ascending=False)
             
-            display_cols = ['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'Finishing_Efficiency', 'xG90', 'Ast/90', 'Archetype']
+        if use_step_up:
+            # PROJECT TO PREMIER LEAGUE
+            gems = project_to_tier(gems, target_tier='Premier League')
+            # Swap projected columns for display/filtering
+            cols_to_swap = ['Gls/90', 'Ast/90', 'xG90', 'xA90', 'Sh/90', 'SoT/90']
+            for col in cols_to_swap:
+                if f'Projected_{col}' in gems.columns:
+                    gems[col] = gems[f'Projected_{col}']
+            st.info("📉 Stats have been discounted to reflect projected Premier League output.")
+
+        # -------------------------------------------------------------------------
+        # 2. FILTERS
+        # -------------------------------------------------------------------------
+        st.subheader("🔍 Discovery Filters")
+        
+        tab_efficiency, tab_style, tab_basics = st.tabs(["🚀 Efficiency", "🦄 The Unicorn Finder", "📊 Basics"])
+        
+        with tab_efficiency:
+            st.caption("Find players who overperform their expected metrics (Clinical Finishing & Creativity).")
+            col1, col2 = st.columns(2)
+            with col1:
+                min_fin_eff = st.slider("Min Finishing Efficiency (Gls - xG):", -0.5, 1.0, 0.0, step=0.05, 
+                                        help="Positive = Scoring more than expected.")
+            with col2:
+                min_creat_eff = st.slider("Min Creative Efficiency (Ast - xA):", -0.5, 1.0, 0.0, step=0.05,
+                                          help="Positive = Assisting more than expected.")
+
+        with tab_style:
+            st.caption("Find players with unique, hybrid profiles that defy standard categorization.")
+            unicorn_score = st.slider("🦄 Stylistic Uniqueness (Unicorn Score):", 0, 100, 0,
+                                      help="0 = Generic Archetype, 100 = Unique Stylistic Outlier.")
+            
+        with tab_basics:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                max_age = st.slider("Max Age:", 16, 35, 24)
+            with col2:
+                min_90s = st.slider("Min 90s Played:", 0.0, 30.0, 5.0)
+            with col3:
+                # Ensure percentile cols exist
+                if 'Gls/90_pct' in gems.columns:
+                     min_percentile = st.slider("Min Gls/90 Percentile:", 0, 100, 0)
+                else:
+                     min_percentile = 0
+
+        # Apply Filters
+        # Ensure columns exist (patch for cached data)
+        if 'Finishing_Efficiency' not in gems.columns and 'Gls/90' in gems.columns: 
+            gems['Finishing_Efficiency'] = gems['Gls/90'] - gems.get('xG90', 0)
+        if 'Creative_Efficiency' not in gems.columns and 'Ast/90' in gems.columns: 
+            gems['Creative_Efficiency'] = gems['Ast/90'] - gems.get('xA90', 0)
+        if 'Outlier_Score' not in gems.columns: 
+            gems['Outlier_Score'] = 0.0
+
+        filtered_gems = gems[
+            (gems.get('Finishing_Efficiency', 0) >= min_fin_eff) &
+            (gems.get('Creative_Efficiency', 0) >= min_creat_eff) &
+            (gems.get('Outlier_Score', 0) >= unicorn_score) &
+            (gems['Age'] <= max_age) &
+            (gems['90s'] >= min_90s)
+        ]
+        
+        if min_percentile > 0 and 'Gls/90_pct' in filtered_gems.columns:
+            filtered_gems = filtered_gems[filtered_gems['Gls/90_pct'] >= min_percentile]
+        
+        # -------------------------------------------------------------------------
+        # 3. RESULTS
+        # -------------------------------------------------------------------------
+        st.divider()
+        st.subheader(f"🎯 Results ({len(filtered_gems)} players)")
+        
+        if not filtered_gems.empty:
+            # Sort
+            if unicorn_score > 0:
+                filtered_gems = filtered_gems.sort_values('Outlier_Score', ascending=False)
+            else:
+                filtered_gems = filtered_gems.sort_values('Finishing_Efficiency', ascending=False)
+                
+            cols = ['Player', 'Age', 'League', 'Squad', 'Archetype', 'Finishing_Efficiency', 'Creative_Efficiency', 'Outlier_Score']
+            # Add Gls/90 to view context
+            if 'Gls/90' in filtered_gems.columns: cols.append('Gls/90')
+
             st.dataframe(
-                gems_sorted[display_cols].head(50),
-                use_container_width=True,
+                filtered_gems[cols].head(50), 
+                use_container_width=True, 
                 hide_index=True
             )
             
-            # Export button
-            csv = gems_sorted.to_csv(index=False)
-            st.download_button(
-                label="📥 Download as CSV",
-                data=csv,
-                file_name=f"hidden_gems_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-            )
+            # Export
+            csv = filtered_gems.to_csv(index=False)
+            st.download_button("📥 Download Data", csv, "hidden_gems.csv", "text/csv")
         else:
-            st.info("No players match the selected criteria. Try adjusting the filters.")
+            st.warning("No players found. Try relaxing the filters.")
+    
+    elif search_mode == "🎯 Benchmark (Player Match)":
+        # -------------------------------------------------------------------------
+        # BENCHMARK SEARCH LOGIC
+        # -------------------------------------------------------------------------
+        st.subheader("🎯 Find the 'Next'...")
+        st.caption("Search for players across lower leagues who statically resemble a top-tier star.")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Benchmark Player Selector
+            # Use 'Player (Squad)' format for uniqueness
+            player_options = [f"{row['Player']} ({row['Squad']})" for _, row in df.iterrows()]
+            player_options = sorted(list(set(player_options))) 
+            
+            benchmark_player_entry = st.selectbox(
+                "Benchmark Player (The Ideal):",
+                options=player_options,
+                index=None,
+                placeholder="e.g. Bukayo Saka",
+                key='benchmark_player'
+            )
+            
+            benchmark_name = benchmark_player_entry.split(" (")[0] if benchmark_player_entry else None
+        
+        with col2:
+            target_league = st.selectbox(
+                "Target League:",
+                options=LEAGUES,
+                key='benchmark_target_league'
+            )
+            
+        with col3:
+            priority = st.selectbox(
+                "Metric Priority:",
+                options=list(SCOUTING_PRIORITIES.keys()),
+                key='benchmark_priority'
+            )
+            
+        if benchmark_name and target_league:
+            st.divider()
+            
+            # Run similarity search
+            st.write(f"Finding **{priority}** profiles in **{target_league}** similar to **{benchmark_name}**...")
+            
+            try:
+                # Use engine to find similar players
+                results = engine.find_similar_players(
+                    target_player=benchmark_name, 
+                    league=target_league,
+                    top_n=20,
+                    use_position_weights=True,
+                    scouting_priority=priority,
+                    target_league_tier=LEAGUE_TO_TIER.get(target_league)
+                )
+                
+                if results is not None and not results.empty:
+                    st.success(f"Found {len(results)} matches!")
+                    
+                    # Display columns
+                    display_cols = ['Player', 'Squad', 'Age', 'Match_Score', 'Primary_Drivers']
+                    
+                    # Add Proxy Warning column if it exists and has content
+                    if 'Proxy_Warnings' in results.columns and results['Proxy_Warnings'].str.len().sum() > 0:
+                         display_cols.append('Proxy_Warnings')
+                    
+                    st.dataframe(
+                        results[display_cols],
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Match_Score": st.column_config.ProgressColumn(
+                                "Similarity Score",
+                                help="How similar the player is to the benchmark",
+                                format="%.1f%%",
+                                min_value=0,
+                                max_value=100,
+                            ),
+                            "Proxy_Warnings": st.column_config.TextColumn(
+                                "⚠️ Data Confidence",
+                                help="When stats are missing in lower leagues, we use these proxies.",
+                            )
+                        }
+                    )
+                else:
+                    st.warning("No matches found. Try a different league or benchmark player.")
+                    
+            except Exception as e:
+                st.error(f"Error during search: {e}")
+                # Optional: print stack trace for debugging
+                # st.exception(e)
     
 
 
@@ -1367,11 +1459,22 @@ elif st.session_state.page == '🏆 Leaderboards':
         )
         
         # Universe visualization
+        # Universe visualization
+        col_viz_sets, _ = st.columns([1, 2])
+        with col_viz_sets:
+            show_centroids = st.checkbox("Show Archetype Ideals (Centroids)", value=False, help="Show the 'perfect' version of each archetype.")
+
         universe_fig = PlotlyVisualizations.archetype_universe_filter(
             st.session_state.df_clustered,
             selected_archetypes=selected_universe_archs,
             height=700
         )
+        
+        if show_centroids:
+             centroid_fig = PlotlyVisualizations.plot_archetype_centroids(st.session_state.clusterer)
+             if centroid_fig and hasattr(centroid_fig, 'data'):
+                 for trace in centroid_fig.data:
+                     universe_fig.add_trace(trace)
         
         st.plotly_chart(universe_fig, use_container_width=True)
         

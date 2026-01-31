@@ -386,6 +386,44 @@ class PlayerArchetypeClusterer:
         
         return stats
 
+    def calculate_outlier_scores(self) -> None:
+        """
+        Calculate Euclidean distance of each player from their cluster centroid.
+        Adds 'Centroid_Distance' and 'Outlier_Score' to player_archetypes.
+        
+        High Outlier_Score = 'Unicorn' / Stylistic outlier.
+        """
+        if self.player_archetypes is None or self.kmeans is None:
+            return
+            
+        centroids = self.kmeans.cluster_centers_
+        labels = self.player_archetypes['Cluster'].values
+        
+        # Calculate distance for each player to their assigned centroid
+        distances = []
+        for i, label in enumerate(labels):
+            player_features = self.scaled_features[i]
+            centroid = centroids[label]
+            dist = np.linalg.norm(player_features - centroid)
+            distances.append(dist)
+            
+        self.player_archetypes['Centroid_Distance'] = distances
+        
+        # Normalize to 0-100 Score (Outlier Score)
+        # We use percentiles: 100 = Furthest away (Unicorn)
+        if len(distances) > 0:
+            distances = np.array(distances)
+            try:
+                # Rank distances (Higher distance = Higher rank)
+                # Percentile rank * 100
+                from scipy.stats import rankdata
+                ranks = rankdata(distances)
+                scores = (ranks / len(ranks)) * 100
+            except:
+                scores = np.zeros(len(distances))
+                
+            self.player_archetypes['Outlier_Score'] = scores
+
 
 # ============================================================================
 # MAIN ENTRY POINT
@@ -415,6 +453,7 @@ def cluster_players(
         clusterer_outfield = PlayerArchetypeClusterer(outfield_features, n_clusters=n_clusters)
         # Enable dynamic optimization for outfield players
         clusterer_outfield.fit(df_outfield, optimize=True)
+        clusterer_outfield.calculate_outlier_scores() # Calculate Unicorn scores
         df_outfield_clustered = clusterer_outfield.player_archetypes
     else:
         df_outfield_clustered = df_outfield
@@ -455,7 +494,13 @@ def cluster_players(
             df_gk_clustered['Cluster'] = 0
             df_gk_clustered['Archetype_Confidence'] = 1.0
             df_gk_clustered['PCA_X'] = 0
+            df_gk_clustered['PCA_X'] = 0
             df_gk_clustered['PCA_Y'] = 0
+            
+    # Ensure GK has outlier columns if missing
+    if 'Outlier_Score' not in df_gk_clustered.columns:
+        df_gk_clustered['Outlier_Score'] = 0.0
+        df_gk_clustered['Centroid_Distance'] = 0.0
     else:
         df_gk_clustered = df_gk
     

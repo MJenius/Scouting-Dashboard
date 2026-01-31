@@ -32,7 +32,11 @@ from .constants import (
     PROFILE_WEIGHTS, 
     LEAGUES, 
     RADAR_LABELS,
-    LEAGUE_METRIC_MAP
+    LEAGUE_METRIC_MAP,
+    LEAGUE_TO_TIER,
+    LEAGUE_METRIC_AVAILABILITY,
+    METRIC_PROXIES,
+    SCOUTING_PRIORITIES
 )
 
 
@@ -531,9 +535,11 @@ class SimilarityEngine:
         top_n: int = 5,
         use_position_weights: bool = True,
         use_percentiles: bool = False,
+        scouting_priority: str = 'Standard', 
+        target_league_tier: Optional[str] = None
     ) -> Optional[pd.DataFrame]:
         """
-        Find similar players with Profile-Centric Weighting & Shared-Metric Masking.
+        Find similar players with Profile-Centric Weighting, Shared-Metric Masking, and League Proxies.
         """
         target_idx = self._find_player_index(target_player)
         if target_idx is None:
@@ -541,8 +547,22 @@ class SimilarityEngine:
         
         target_row = self.df.loc[target_idx]
         target_pos = target_row['Primary_Pos']
-        target_league = target_row['League']
+        # The league of the target player (e.g. Saka is in PL)
+        origin_league = target_row['League']
         is_gk = target_pos == 'GK'
+        
+        # Determine the tier of the SEARCH TARGET (Where we are looking)
+        # If the user selected 'League One', we use Tier 3 availability.
+        if target_league_tier:
+             current_tier = target_league_tier
+        elif league != 'all':
+             current_tier = LEAGUE_TO_TIER.get(league, 'Tier 1')
+        else:
+             # Default to Tier 1 availability if searching 'all' or unknown
+             current_tier = 'Tier 1' # Optimistic default
+        
+        # Get available metrics for this target tier
+        available_metrics = set(LEAGUE_METRIC_AVAILABILITY.get(current_tier, FEATURE_COLUMNS))
         
         col_slice = slice(len(FEATURE_COLUMNS), None) if is_gk else slice(0, len(FEATURE_COLUMNS))
         features_subset = GK_FEATURE_COLUMNS if is_gk else FEATURE_COLUMNS
@@ -561,105 +581,128 @@ class SimilarityEngine:
         target_row_idx = self.df.index.get_loc(target_idx)
         target_vector = self.scaled_features[target_row_idx, col_slice].copy()
         
-        # --- HYPER-STRENGTH EXPONENTIAL WEIGHTING ---
+        # --- WEIGHTING STRATEGY ---
         weights = np.ones(len(features_subset))
+        proxy_warnings = []
+        
         if not is_gk:
-            # 1. Start with position-relevant baseline
-            profile_map = {'FW': 'Attacker', 'MF': 'Midfielder', 'DF': 'Defender'}
-            profile_key = profile_map.get(target_pos, 'Midfielder')
-            pw_dict = PROFILE_WEIGHTS[profile_key]
-            weights = np.array([pw_dict.get(col, 1.0) for col in FEATURE_COLUMNS])
-            
-            # 2. Apply Triple Weighting for Elite Stats (>75th Percentile)
-            # This forces the engine to match on STRENGTHS, not generic averages
+            # 1. Start with Profile Defaults or User Priority
+            if scouting_priority in SCOUTING_PRIORITIES and scouting_priority != 'Standard':
+                # Initialize with 1.0, then apply overrides
+                weights = np.ones(len(FEATURE_COLUMNS))
+                priority_weights = SCOUTING_PRIORITIES[scouting_priority]
+                for feat, w in priority_weights.items():
+                    if feat in FEATURE_COLUMNS:
+                        idx = FEATURE_COLUMNS.index(feat)
+                        weights[idx] = w
+            elif use_position_weights:
+                # Use standard position profiles
+                # Use standard position profiles
+                profile_map = {
+                    'FW': 'Attacker', 
+                    'AM': 'Attacker', 
+                    'CM': 'Midfielder',
+                    'DM': 'Midfielder',
+                    'MF': 'Midfielder', # Generic fallback
+                    'FB': 'Defender', 
+                    'CB': 'Defender',
+                    'DF': 'Defender' # Generic fallback
+                }
+                profile_key = profile_map.get(target_pos, 'Midfielder')
+                pw_dict = PROFILE_WEIGHTS[profile_key]
+                weights = np.array([pw_dict.get(col, 1.0) for col in FEATURE_COLUMNS])
+
+            # 2. PROXY LOGIC: Handle missing metrics in the target tier
+            # If a high-weight metric isn't available, shift weight to its proxy
             for i, feat in enumerate(FEATURE_COLUMNS):
-                pct = target_row.get(f"{feat}_pct", 50)
+                original_weight = weights[i]
                 
-                # Triple weighting for elite metrics
-                if pct > 75:
-                    weights[i] *= 3.0
-                
-                # Weakness correlation fix:
-                # If target is weak in this area (< 25th percentile), reduce its weight.
-                # This prevents "Anti-Style" penalties where a better player is rejected 
-                # because they don't share the target's flaws.
-                elif pct < 25:
-                    weights[i] *= 0.5 
+                # If metric is Weighted AND Not Available
+                if original_weight > 0 and feat not in available_metrics:
+                    # Check for Proxy
+                    if feat in METRIC_PROXIES:
+                        proxy_metric, warning_msg = METRIC_PROXIES[feat]
+                        
+                        # Is the proxy available?
+                        if proxy_metric in available_metrics and proxy_metric in FEATURE_COLUMNS:
+                            proxy_idx = FEATURE_COLUMNS.index(proxy_metric)
+                            
+                            # Shift weight: Add missing metric's weight to proxy
+                            weights[proxy_idx] += original_weight
+                            
+                            # Zero out the missing metric
+                            weights[i] = 0
+                            
+                            if warning_msg not in proxy_warnings:
+                                proxy_warnings.append(warning_msg)
+                        else:
+                            # Proxy also missing? Just zero it out.
+                            weights[i] = 0 
+                    else:
+                        # No proxy defined, just zero it.
+                        weights[i] = 0
+
+            # 3. Apply Triple Weighting for Elite Stats (>75th Percentile)
+            # Only apply this boost if the metric is actually available!
+            for i, feat in enumerate(FEATURE_COLUMNS):
+                if weights[i] > 0: # Only boost if we are actually using it
+                    pct = target_row.get(f"{feat}_pct", 50)
+                    if pct > 75:
+                        weights[i] *= 3.0
+                    elif pct < 25:
+                        weights[i] *= 0.5 
 
         # Normalize weights to preserve cosine scale
         norm_weights = weights / weights.mean()
+        
+        # Apply weights to vectors
         target_vector *= norm_weights
         search_feat_matrix *= norm_weights
 
-        # --- SHARED-METRIC MASKING ---
-        if is_gk:
-            target_tracked = set(GK_FEATURE_COLUMNS)
-        else:
-            CORE_9 = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90']
-            target_tracked = set(LEAGUE_METRIC_MAP.get(target_league, CORE_9))
+        # --- COSINE SIMILARITY ---
+        # Note: We use Scaled Features (Z-scores) which implies we are comparing 
+        # "Dominance relative to League" (Percentiles) rather than raw totals.
+        # This matches the user requirement for Cross-Tier comparison.
         
         final_similarities = []
         primary_drivers = []
+        all_warnings = "; ".join(proxy_warnings) if proxy_warnings else ""
         
         for i, (idx, row) in enumerate(search_df.iterrows()):
-            if is_gk:
-                comp_tracked = set(GK_FEATURE_COLUMNS)
-            else:
-                comp_league = row['League']
-                comp_tracked = set(LEAGUE_METRIC_MAP.get(comp_league, CORE_9))
+            # Vectorized Cosine Similarity
+            v1 = target_vector.reshape(1, -1)
+            v2 = search_feat_matrix[i].reshape(1, -1)
             
-            shared = target_tracked.intersection(comp_tracked)
-            shared_indices = [j for j, f in enumerate(features_subset) if f in shared]
+            sim = cosine_similarity(v1, v2)[0][0] * 100
+            if sim < 0: sim = 0
             
-            if not shared_indices:
-                final_similarities.append(0)
-                primary_drivers.append("N/A")
-                continue
-                
-            v1 = target_vector[shared_indices].reshape(1, -1)
-            v2 = search_feat_matrix[i, shared_indices].reshape(1, -1)
-            
-            sim = cosine_similarity(v1, v2)[0][0]
-            
-            # Find Primary Match Drivers (Lowest Weighted Distance)
-            # Identify top 3 features with the lowest weighted Euclidean distance
+            # Identify Drivers (Top 3 Lowest Weighted Distance)
             distances_local = np.abs(v1 - v2).flatten()
-            shared_feats_list = [features_subset[x] for x in shared_indices]
             
             feature_distances = []
-            for k, feat in enumerate(shared_feats_list):
-                 dist = distances_local[k]
-                 feature_distances.append((feat, dist))
+            for k, feat in enumerate(features_subset):
+                 # Only consider metrics with non-zero weight as candidates for "Drivers"
+                 if weights[k] > 0:
+                     dist = distances_local[k]
+                     feature_distances.append((feat, dist))
             
-            # Sort by distance (lowest is best match)
             feature_distances.sort(key=lambda x: x[1])
-            
-            # Pick top 3
             top_3_feats = [x[0] for x in feature_distances[:3]]
             top_3_labels = [RADAR_LABELS.get(f, f) for f in top_3_feats]
             
-            driver_str = "Driven by " + " & ".join(top_3_labels) + " overlap"
-            
-            # Stylistic Twin Check (>95%)
-            # We add this decoration here, but the similarity score penalty below might happen
-            # So we defer the decoration until after penalty
-            
-            # Aggressive Coverage Penalty
-            coverage = len(shared) / len(target_tracked)
-            if coverage < 1.0:
-                sim *= (coverage ** 2.0) # Quadratic penalty for missing data
-            
-            final_sim_score = sim * 100
-            if final_sim_score < 0: final_sim_score = 0
-            
-            if final_sim_score > 95:
+            driver_str = "Driven by " + " & ".join(top_3_labels)
+            if all_warnings:
+                driver_str += f" | ⚠️ {all_warnings}"
+            if sim > 95:
                 driver_str += " (Stylistic Twin)"
                 
-            final_similarities.append(final_sim_score)
+            final_similarities.append(sim)
             primary_drivers.append(driver_str)
         
         search_df['Match_Score'] = np.array(final_similarities)
         search_df['Primary_Drivers'] = primary_drivers
+        search_df['Proxy_Warnings'] = all_warnings # Add column for UI to use if needed
+        
         results = search_df[search_df.index != target_idx].sort_values('Match_Score', ascending=False)
         return results.head(top_n)
     

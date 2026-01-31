@@ -261,15 +261,23 @@ def clean_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
     attacking_metrics = ['Gls/90', 'Ast/90']
     
     # Valid numeric coercion
+    # Valid numeric coercion & Instantiation
     for col in FEATURE_COLUMNS + GK_FEATURE_COLUMNS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+        if col not in df.columns:
+            df[col] = 0.0 # Instantiate missing columns with 0
+        df[col] = pd.to_numeric(df[col], errors='coerce')
 
     # Create Finishing Efficiency (Gls - xG) - New metric for Hidden Gems
     if 'Gls/90' in df.columns and 'xG90' in df.columns:
          df['Finishing_Efficiency'] = df['Gls/90'] - df['xG90']
     else:
          df['Finishing_Efficiency'] = 0.0
+
+    # Create Creative Efficiency (Ast - xA) - New metric
+    if 'Ast/90' in df.columns and 'xA90' in df.columns:
+         df['Creative_Efficiency'] = df['Ast/90'] - df['xA90']
+    else:
+         df['Creative_Efficiency'] = 0.0
 
     # -------------------------------------------------------------------------
     # NATIONAL LEAGUE IMPUTATION (Median from League Two)
@@ -516,6 +524,40 @@ def calculate_position_percentiles(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def calculate_age_z_scores(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate Z-Score for G+A/90 grouped by Age and Position.
+    This helps identify players performing well above their age-peers.
+    """
+    df = df.copy()
+    
+    # helper for G+A
+    if 'Gls/90' in df.columns and 'Ast/90' in df.columns:
+        df['G_plus_A'] = df['Gls/90'] + df['Ast/90']
+    else:
+        df['G_plus_A'] = 0.0
+        
+    # Group by Age and Primary_Pos
+    # We use transform to keep the original index
+    
+    # Calculate Mean and Std Dev per group
+    # Require at least 5 players in the group to calculate Z-score, else 0
+    
+    # Function to apply z-score within group
+    def z_score_func(x):
+        if len(x) < 5 or x.std() == 0:
+            return 0.0
+        return (x - x.mean()) / x.std()
+
+    # Apply grouping
+    df['Age_Z_Score_GA90'] = df.groupby(['Age', 'Primary_Pos'])['G_plus_A'].transform(z_score_func)
+    
+    # Fill any NaNs (from small groups) with 0
+    df['Age_Z_Score_GA90'] = df['Age_Z_Score_GA90'].fillna(0.0)
+    
+    return df
+
+
 # ============================================================================
 # DATA COMPLETENESS SCORING
 # ============================================================================
@@ -698,6 +740,11 @@ def process_all_data(csv_path: str, min_90s: int = MIN_MINUTES_PLAYED) -> Dict[s
     df_filtered = calculate_position_percentiles(df_filtered)
     pct_cols = [col for col in df_filtered.columns if '_pct' in col]
     print(f"✓ Added {len(pct_cols)} percentile columns")
+
+    # Step 5a: Calculate Age Z-Scores (G+A/90)
+    print("\n[5a/7] Calculating Age Z-Scores...")
+    df_filtered = calculate_age_z_scores(df_filtered)
+    print("✓ Calculated Age Z-Scores for G+A/90")
     
     # Step 6: Completeness scoring
     print("\n[6/7] Calculating data completeness scores...")

@@ -79,7 +79,6 @@ class LLMScoutNarrativeGenerator:
         archetype: str,
         league: str,
         age: int,
-        include_value: bool = True,
     ) -> str:
         """
         Build prompt for Gemini API.
@@ -102,6 +101,11 @@ class LLMScoutNarrativeGenerator:
         gls_90 = player_data.get('Gls/90', 0)
         ast_90 = player_data.get('Ast/90', 0)
         
+        # Extract efficiency metrics
+        fin_eff = player_data.get('Finishing_Efficiency', 0.0)
+        creat_eff = player_data.get('Creative_Efficiency', 0.0)
+        age_z = player_data.get('Age_Z_Score_GA90', 0.0)
+        
         # Build context
         prompt = f"""You are a professional football scout writing a concise scouting report.
 
@@ -112,29 +116,31 @@ class LLMScoutNarrativeGenerator:
 - League: {league}
 - Archetype: {archetype}
 
+**Performance Indicators:**
+- Goals/90: {gls_90:.2f}
+- Assists/90: {ast_90:.2f}
+- Finishing Efficiency (Goals - xG): {fin_eff:+.2f}
+- Creative Efficiency (Ast - xA): {creat_eff:+.2f}
+- Age Z-Score (G+A/90 vs cohort): {age_z:+.2f}
+
 **Statistical Strengths:**
 {chr(10).join([f'- {s}' for s in top_strengths])}
 
 **Areas for Development:**
 {chr(10).join([f'- {w}' for w in weaknesses])}
 
-**Key Stats:**
-- Goals/90: {gls_90:.2f}
-- Assists/90: {ast_90:.2f}
-
 **Instructions:**
-**Instructions:**
-Write a 3 sentence professional scouting summary. Include:
-1. Playing style and archetype context
-2. How their strengths manifest in their league environment
-3. One tactical insight or development area
+Write a 3 sentence professional scouting summary.
+1. Analyze if this player is a high-potential outlier or a high-variance risk based on their xG overperformance (Efficiency metrics).
+2. Contextualize their performance relative to their age (using Age Z-Score).
+3. Mention their tactical fit based on archetype.
 
-**Tone:** Professional, analytical, balanced (not overly positive or negative)
-**Length:** Around 50-60 words (strictly 3 sentences)
-**Format:** Plain text paragraph (no bullet points)
+**Tone:** Professional, analytical, balanced.
+**Length:** Around 50-60 words (strictly 3 sentences).
+**Format:** Plain text paragraph.
 
 **Example Style:**
-"Despite playing in a physical League Two environment, this Poacher archetype shows Premier League-level movement in the box, though his defensive work rate requires significant coaching."
+"This advanced playmaker shows unsustainable finishing efficiency (+0.45), suggesting regression risk despite elite creative numbers. However, his Age Z-Score of +2.1 ranks him as a standout generational talent amongst U23s in the Bundesliga. Defensively, he requires a high-pressing system to mask his limited recovery pace."
 
 Write the scouting summary:"""
         
@@ -143,7 +149,6 @@ Write the scouting summary:"""
     def generate_narrative(
         self,
         player_data: pd.Series,
-        include_value: bool = True,
         max_retries: int = 2,
     ) -> str:
         """
@@ -185,7 +190,6 @@ Write the scouting summary:"""
                 archetype,
                 league,
                 age,
-                include_value
             )
             
             # Call Gemini API
@@ -193,13 +197,6 @@ Write the scouting summary:"""
             
             if response and response.text:
                 narrative = response.text.strip()
-                
-                # Add market value context if requested
-                if include_value and 'Estimated_Value_£M' in player_data.index:
-                    value = player_data['Estimated_Value_£M']
-                    value_tier = player_data.get('Value_Tier', 'Unknown')
-                    narrative += f"\n\nMarket Value Analysis: Estimated at GBP {value:.1f}M, categorized as {value_tier}."
-                
                 return narrative
             else:
                 raise ValueError("Empty response from Gemini API")
@@ -259,7 +256,6 @@ Write the scouting summary:"""
 
 def generate_llm_narrative(
     player_data: pd.Series,
-    include_value: bool = True,
     api_key: Optional[str] = None,
     use_llm: bool = True,
 ) -> str:
@@ -276,4 +272,4 @@ def generate_llm_narrative(
         Scouting narrative string
     """
     generator = LLMScoutNarrativeGenerator(api_key=api_key, use_llm=use_llm)
-    return generator.generate_narrative(player_data, include_value=include_value)
+    return generator.generate_narrative(player_data)

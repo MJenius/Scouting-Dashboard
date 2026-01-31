@@ -700,6 +700,64 @@ class PlotlyVisualizations:
         
         return fig
 
+    @staticmethod
+    def plot_archetype_centroids(
+        clusterer,
+        height: int = 700,
+        width: int = 1000,
+    ) -> go.Figure:
+        """
+        Plot archetype centroids ("Idealized Versions") on the PCA map.
+        
+        Args:
+            clusterer: Fitted PlayerArchetypeClusterer instance
+            height: Chart height
+            width: Chart width
+            
+        Returns:
+            Plotly Figure
+        """
+        if not hasattr(clusterer, 'pca') or clusterer.pca is None:
+            return go.Figure()
+            
+        # Get centroids in PCA space
+        # Centroids are in scaled feature space. We need to project them using the same PCA.
+        centroids_scaled = clusterer.kmeans.cluster_centers_
+        centroids_pca = clusterer.pca.transform(centroids_scaled)
+        
+        # Get archetype labels
+        archetype_labels = []
+        for cid in range(clusterer.n_clusters):
+            profile = clusterer.get_cluster_profile(cid)
+            if profile:
+                archetype_labels.append(profile['label'])
+            else:
+                archetype_labels.append(f"Cluster {cid}")
+                
+        # Create dataframe for plotting
+        centroid_df = pd.DataFrame({
+            'PCA_X': centroids_pca[:, 0],
+            'PCA_Y': centroids_pca[:, 1],
+            'Archetype': archetype_labels,
+            'Type': 'Archetype Ideal'
+        })
+        
+        # Plot
+        fig = px.scatter(
+            centroid_df,
+            x='PCA_X',
+            y='PCA_Y',
+            color='Archetype',
+            symbol='Type',
+            title='Archetype Idealized Centroids',
+            height=height,
+            width=width,
+        )
+        
+        fig.update_traces(marker=dict(size=15, line=dict(width=2, color='white')))
+        fig.update_layout(template='plotly_dark')
+        return fig
+
 
 
 # Convenience functions

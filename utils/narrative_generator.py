@@ -65,7 +65,6 @@ class ScoutNarrativeGenerator:
     def generate_scouts_take(
         self,
         player_data: pd.Series,
-        include_transfer_value: bool = False,
         use_llm: bool = False,
         api_key: Optional[str] = None,
     ) -> Dict[str, str]:
@@ -74,7 +73,6 @@ class ScoutNarrativeGenerator:
         
         Args:
             player_data: Player row from DataFrame with all stats
-            include_transfer_value: Whether to include market value analysis
             use_llm: Whether to attempt AI generation (Google Gemini)
             api_key: Optional API key for Gemini
             
@@ -94,7 +92,7 @@ class ScoutNarrativeGenerator:
                 
                 llm_gen = LLMScoutNarrativeGenerator(api_key=api_key, use_llm=True)
                 if llm_gen.use_llm:
-                    ai_narrative = llm_gen.generate_narrative(player_data, include_value=include_transfer_value)
+                    ai_narrative = llm_gen.generate_narrative(player_data)
                     
                     # Return structure mimicking the rule-based one, but with AI text
                     # We still generate rule-based sections for structure if needed, 
@@ -129,7 +127,7 @@ class ScoutNarrativeGenerator:
         overview = self._generate_overview(player_data)
         strengths = self._generate_strengths(player_data)
         weaknesses = self._generate_weaknesses(player_data)
-        recommendation = self._generate_recommendation(player_data, include_transfer_value)
+        recommendation = self._generate_recommendation(player_data)
         
         # Compile full report
         full_report = f"{overview}\n\n{strengths}\n\n{weaknesses}\n\n{recommendation}"
@@ -260,7 +258,7 @@ class ScoutNarrativeGenerator:
         
         return weakness_text
     
-    def _generate_recommendation(self, player_data: pd.Series, include_value: bool = False) -> str:
+    def _generate_recommendation(self, player_data: pd.Series) -> str:
         """Generate final recommendation based on all data."""
         name = player_data.get('Player', 'Unknown Player')
         try:
@@ -299,10 +297,7 @@ class ScoutNarrativeGenerator:
             rec_text += f"ℹ️ **MONITOR STATUS** - Current metrics don't suggest immediate transfer priority. "
             rec_text += "Track development trajectory before revisiting."
         
-        if include_value and 'Estimated_Value_£M' in player_data.index:
-            value = player_data['Estimated_Value_£M']
-            if not pd.isna(value):
-                rec_text += f" Estimated market value: £{value:.1f}M."
+            rec_text += "Track development trajectory before revisiting."
         
         return rec_text
     
@@ -512,20 +507,19 @@ class ScoutNarrativeGenerator:
         }
 
 
-def generate_narrative_for_player(player_data: pd.Series, include_value: bool = False, include_variance: bool = True) -> str:
+def generate_narrative_for_player(player_data: pd.Series, include_variance: bool = True) -> str:
     """
     Convenience function to generate a full scout's take narrative.
     
     Args:
         player_data: Player row from DataFrame
-        include_value: Whether to include market value in recommendation
         include_variance: Whether to include variance analysis
         
     Returns:
         Complete narrative text
     """
     generator = ScoutNarrativeGenerator()
-    report = generator.generate_scouts_take(player_data, include_value)
+    report = generator.generate_scouts_take(player_data)
     
     if include_variance:
         # Add variance analysis
