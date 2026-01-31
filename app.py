@@ -410,14 +410,20 @@ if st.session_state.page == '🔍 Player Search':
                     import os
                     
                     # Generate PDF in memory
+                    # Generate PDF in memory
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmpfile:
-                        export_scouting_pdf(player_data, narrative, tmpfile.name)
-                        tmpfile.flush()
+                        tmp_filename = tmpfile.name
+                    
+                    # Close the file handle so FPDF can open it
+                    try:
+                        export_scouting_pdf(player_data, narrative, tmp_filename)
                         
-                        with open(tmpfile.name, "rb") as f:
+                        with open(tmp_filename, "rb") as f:
                             pdf_data = f.read()
-                        
-                        os.unlink(tmpfile.name)
+                    finally:
+                        # Clean up
+                        if os.path.exists(tmp_filename):
+                            os.unlink(tmp_filename)
                     
                     # Direct download button
                     st.download_button(
@@ -667,14 +673,23 @@ if st.session_state.page == '🔍 Player Search':
                                     # Show key stats
                                     st.write("**Key Stats:**")
                                     stat_cols = st.columns(3)
-                                    if 'Gls/90' in row.index:
-                                        stat_cols[0].metric("Gls/90", f"{row['Gls/90']:.2f}")
-                                    if 'Ast/90' in row.index:
-                                        stat_cols[1].metric("Ast/90", f"{row['Ast/90']:.2f}")
-                                    if 'Age' in row.index:
-                                        age_val = row['Age']
-                                        age_display = int(age_val) if not pd.isna(age_val) else "??"
-                                        stat_cols[2].metric("Age", age_display)
+                                    
+                                    if row['Primary_Pos'] == 'GK':
+                                        if 'Save%' in row.index:
+                                            stat_cols[0].metric("Save%", f"{row['Save%']:.1f}%")
+                                        if 'CS%' in row.index:
+                                            stat_cols[1].metric("Clean Sheet%", f"{row['CS%']:.1f}%")
+                                        if 'GA90' in row.index:
+                                            stat_cols[2].metric("GA90", f"{row['GA90']:.2f}")
+                                    else:
+                                        if 'Gls/90' in row.index:
+                                            stat_cols[0].metric("Gls/90", f"{row['Gls/90']:.2f}")
+                                        if 'Ast/90' in row.index:
+                                            stat_cols[1].metric("Ast/90", f"{row['Ast/90']:.2f}")
+                                        if 'Age' in row.index:
+                                            age_val = row['Age']
+                                            age_display = int(age_val) if not pd.isna(age_val) else "??"
+                                            stat_cols[2].metric("Age", age_display)
                                     
                                     # Show similarity breakdown
                                     st.write("**Similarity Breakdown (Target's Key Strengths):**")
@@ -746,9 +761,14 @@ if st.session_state.page == '🔍 Player Search':
                                         st.write(f"• {feat}: {similarity_pct}% similar (Lower match here)")
                                     
                                     # Summary
-                                    st.write(f"**Overall Match**: {top_match_score:.1f}% - " +
-                                           "Strong profile alignment with key differences in " +
-                                           f"{most_different_features[0][0]}")
+                                    if most_different_features:
+                                        diff_feat = most_different_features[0][0]
+                                        st.write(f"**Overall Match**: {top_match_score:.1f}% - " +
+                                               "Strong profile alignment with key differences in " +
+                                               f"{diff_feat}")
+                                    else:
+                                         st.write(f"**Overall Match**: {top_match_score:.1f}% - " +
+                                               "Strong profile alignment across all tracked metrics.")
                             except Exception as e:
                                 st.warning(f"Could not calculate similarity breakdown: {e}")
                     

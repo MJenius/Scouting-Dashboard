@@ -17,6 +17,7 @@ import numpy as np
 from typing import Tuple, Dict, List, Optional
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
+from sklearn.metrics import silhouette_score
 import warnings
 
 from .constants import FEATURE_COLUMNS, ARCHETYPES, ARCHETYPE_NAMES
@@ -63,12 +64,49 @@ class PlayerArchetypeClusterer:
         self.archetype_profiles = {}
         self.player_archetypes = None
     
-    def fit(self, df: pd.DataFrame) -> 'PlayerArchetypeClusterer':
+    def optimize_k(self, k_range: range = range(5, 13)) -> int:
+        """
+        Find optimal k using Silhouette Score.
+        Returns the k with the highest silhouette score.
+        """
+        if len(self.scaled_features) < 20:
+            return 3 # Fallback for tiny datasets
+            
+        print(f"[Clustering] Optimizing k over range {k_range} using Silhouette Score...")
+        
+        best_k = self.n_clusters
+        best_score = -1.0
+        
+        # Use a sample for speed if dataset is large
+        sample_size = 3000 if len(self.scaled_features) > 5000 else None
+        
+        for k in k_range:
+            # Fast fit
+            km = KMeans(n_clusters=k, random_state=self.RANDOM_STATE, n_init=3)
+            labels = km.fit_predict(self.scaled_features)
+            
+            try:
+                score = silhouette_score(self.scaled_features, labels, sample_size=sample_size)
+                # print(f"  k={k}: Score={score:.3f}") # Debug
+                
+                # We prefer a higher k if scores are close, to get more nuance
+                # But strict silhouette maximizes separation.
+                if score > best_score:
+                    best_score = score
+                    best_k = k
+            except:
+                pass
+                
+        print(f"✓ Optimal k determined: {best_k} (Silhouette: {best_score:.3f})")
+        return best_k
+    
+    def fit(self, df: pd.DataFrame, optimize: bool = True) -> 'PlayerArchetypeClusterer':
         """
         Fit K-Means model and analyze cluster characteristics.
         
         Args:
             df: Player DataFrame (must have same length as scaled_features)
+            optimize: If True, automatically find best k
             
         Returns:
             self for method chaining
@@ -78,6 +116,9 @@ class PlayerArchetypeClusterer:
                 f"DataFrame length {len(df)} doesn't match "
                 f"scaled_features {len(self.scaled_features)}"
             )
+        
+        if optimize:
+            self.n_clusters = self.optimize_k()
         
         print(f"\n[Clustering] Fitting K-Means with k={self.n_clusters}...")
         
@@ -117,6 +158,8 @@ class PlayerArchetypeClusterer:
         self.player_archetypes['PCA_Y'] = pca_features[:, 1]
         explained_var = self.pca.explained_variance_ratio_.sum()
         print(f"✓ PCA explains {explained_var*100:.1f}% of variance")
+        if explained_var < 0.60:
+             print("⚠️  Warning: PCA explained variance is low. Consider 3D or t-SNE if visualization is cluttered.")
         
         return self
     
@@ -352,7 +395,8 @@ def cluster_players(
     if len(df_outfield) > 0:
         outfield_features = scaled_features[~is_gk, :len(FEATURE_COLUMNS)]
         clusterer_outfield = PlayerArchetypeClusterer(outfield_features, n_clusters=n_clusters)
-        clusterer_outfield.fit(df_outfield)
+        # Enable dynamic optimization for outfield players
+        clusterer_outfield.fit(df_outfield, optimize=True)
         df_outfield_clustered = clusterer_outfield.player_archetypes
     else:
         df_outfield_clustered = df_outfield

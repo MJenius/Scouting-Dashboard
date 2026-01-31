@@ -66,7 +66,15 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
     (Data Fix: Corrected file swap for Bundesliga/Serie A - Cache Bump)
     """
     try:
-        df = pd.read_csv(file_path, low_memory=low_memory)
+        # robust delimiter detection
+        try:
+            df = pd.read_csv(file_path, low_memory=low_memory)
+            if len(df.columns) <= 1:
+                # Try semicolon
+                df = pd.read_csv(file_path, sep=';', low_memory=low_memory)
+        except:
+             df = pd.read_csv(file_path, sep=';', low_memory=low_memory)
+            
     except FileNotFoundError:
         raise FileNotFoundError(f"CSV file not found: {file_path}")
     
@@ -252,22 +260,39 @@ def clean_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
     
     attacking_metrics = ['Gls/90', 'Ast/90']
     
-    for col in FEATURE_COLUMNS:
+    # Valid numeric coercion
+    for col in FEATURE_COLUMNS + GK_FEATURE_COLUMNS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            is_nl = df['League'] == 'National League'
-            if col not in attacking_metrics:
-                # Keep NaN for National League to avoid matching with failures
-                df.loc[~is_nl, col] = df.loc[~is_nl, col].fillna(0)
-            else:
-                # Attacking metrics: fill with 0 (safe)
-                df[col] = df[col].fillna(0)
+
+    # Impute missing values with Position-Specific League Averages (or Global Fallback)
+    # This prevents "Limited Data" players from looking like failures (0s)
+    # Strategy: 
+    # 1. Fill with League+Position Mean
+    # 2. Fill remaining with Global Position Mean
+    # 3. Fill remaining with 0 (safe fallback)
     
-    # Handle GK metrics
-    for col in GK_FEATURE_COLUMNS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    print("ℹ️  Imputing missing data with league/position averages...")
+    
+    # We do this for FEATURE_COLUMNS (Outfield) and GK_FEATURE_COLUMNS
+    all_metrics = list(set(FEATURE_COLUMNS + GK_FEATURE_COLUMNS))
+    
+    for col in all_metrics:
+        if col not in df.columns:
+            continue
+            
+        # 1. League + Position Mean
+        df[col] = df[col].fillna(
+            df.groupby(['League', 'Primary_Pos'])[col].transform('mean')
+        )
+        
+        # 2. Global Position Mean
+        df[col] = df[col].fillna(
+            df.groupby(['Primary_Pos'])[col].transform('mean')
+        )
+        
+        # 3. Zero Fallback
+        df[col] = df[col].fillna(0.0)
             
     return df
 
@@ -438,6 +463,19 @@ def calculate_position_percentiles(df: pd.DataFrame) -> pd.DataFrame:
                         )
                     df.loc[mask, quality_col] = quality
     
+    
+    # Explicitly mask outfield percentiles for GKs to prevent contamination
+    # (And vice versa if needed, though usually GKs are the issue)
+    gk_mask = df['Primary_Pos'] == 'GK'
+    if gk_mask.any():
+        outfield_pct_cols = [f'{c}_pct' for c in FEATURE_COLUMNS if f'{c}_pct' in df.columns]
+        if outfield_pct_cols:
+            df.loc[gk_mask, outfield_pct_cols] = np.nan
+        
+        outfield_qual_cols = [f'{c}_pct_quality' for c in FEATURE_COLUMNS if f'{c}_pct_quality' in df.columns]
+        if outfield_qual_cols:
+            df.loc[gk_mask, outfield_qual_cols] = np.nan
+            
     return df
 
 

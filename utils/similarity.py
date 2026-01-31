@@ -259,7 +259,7 @@ class SimilarityEngine:
         )
     """
     
-    FUZZY_MATCH_THRESHOLD = 85  # Minimum match score for fuzzy fallback (increased for better accuracy)
+    FUZZY_MATCH_THRESHOLD = 75  # Lower threshold to catch more variations (accents, typos)
     
     def __init__(
         self,
@@ -463,9 +463,15 @@ class SimilarityEngine:
         col_slice = slice(len(FEATURE_COLUMNS), None) if is_gk else slice(0, len(FEATURE_COLUMNS))
         feature_set = GK_FEATURE_COLUMNS if is_gk else FEATURE_COLUMNS
         
-        CORE_9 = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90']
-        tracked1 = set(LEAGUE_METRIC_MAP.get(row1['League'], CORE_9))
-        tracked2 = set(LEAGUE_METRIC_MAP.get(row2['League'], CORE_9))
+        if is_gk:
+            # GKs use their own full metric set, assuming availability
+            tracked1 = set(GK_FEATURE_COLUMNS)
+            tracked2 = set(GK_FEATURE_COLUMNS)
+        else:
+            CORE_9 = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90']
+            tracked1 = set(LEAGUE_METRIC_MAP.get(row1['League'], CORE_9))
+            tracked2 = set(LEAGUE_METRIC_MAP.get(row2['League'], CORE_9))
+        
         shared = tracked1.intersection(tracked2)
         
         vec1 = self.scaled_features[self.df.index.get_loc(idx1), col_slice]
@@ -492,10 +498,30 @@ class SimilarityEngine:
                 
                 drivers_priority[feat] = pct * pos_bonus
         
-        # Sort by priority (Highest percentile/importance first)
-        sorted_feats = sorted(drivers_priority.keys(), key=lambda x: drivers_priority[x], reverse=True)
+                
+                drivers_priority[feat] = pct * pos_bonus
         
-        # Return distances in the sorted order
+        # Sort by "Shared Excellence" Score
+        # Previously just sorted by distance. Now we want: High Target Pct + High Match Pct + Low Distance
+        # We construct a synthetic score for sorting purposes
+        match_scores = {}
+        for feat in drivers_priority.keys():
+            p1 = row1.get(f"{feat}_pct", 50)
+            p2 = row2.get(f"{feat}_pct", 50)
+            dist = distances.get(feat, 100)
+            
+            # Score = Combined Percentile (max 200) - Penalty for Distance
+            # If distance is small, score is high. If percentiles are high, score is bigger.
+            # Example: 90+90, dist 0.1 => 180 - 2.5 = 177.5
+            # Example: 50+50, dist 0.1 => 100 - 2.5 = 97.5 (Elite stats win)
+            # Example: 90+20, dist 2.0 => 110 - 50 = 60 (Mismatch loses)
+            score = (p1 + p2) - (dist * 25)
+            match_scores[feat] = score
+
+        # Sort features by this excellence score descending
+        sorted_feats = sorted(match_scores.keys(), key=lambda x: match_scores[x], reverse=True)
+        
+        # Return distances in the sorted order (Top items are the Drivers)
         return {feat: distances[feat] for feat in sorted_feats}
     
     def find_similar_players(
@@ -552,7 +578,13 @@ class SimilarityEngine:
                 # Triple weighting for elite metrics
                 if pct > 75:
                     weights[i] *= 3.0
-                # Penalty for weakness? Optional, but let's stick to the request: Reward strengths.
+                
+                # Weakness correlation fix:
+                # If target is weak in this area (< 25th percentile), reduce its weight.
+                # This prevents "Anti-Style" penalties where a better player is rejected 
+                # because they don't share the target's flaws.
+                elif pct < 25:
+                    weights[i] *= 0.5 
 
         # Normalize weights to preserve cosine scale
         norm_weights = weights / weights.mean()
@@ -560,15 +592,21 @@ class SimilarityEngine:
         search_feat_matrix *= norm_weights
 
         # --- SHARED-METRIC MASKING ---
-        CORE_9 = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90']
-        target_tracked = set(LEAGUE_METRIC_MAP.get(target_league, CORE_9))
+        if is_gk:
+            target_tracked = set(GK_FEATURE_COLUMNS)
+        else:
+            CORE_9 = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90']
+            target_tracked = set(LEAGUE_METRIC_MAP.get(target_league, CORE_9))
         
         final_similarities = []
         primary_drivers = []
         
         for i, (idx, row) in enumerate(search_df.iterrows()):
-            comp_league = row['League']
-            comp_tracked = set(LEAGUE_METRIC_MAP.get(comp_league, CORE_9))
+            if is_gk:
+                comp_tracked = set(GK_FEATURE_COLUMNS)
+            else:
+                comp_league = row['League']
+                comp_tracked = set(LEAGUE_METRIC_MAP.get(comp_league, CORE_9))
             
             shared = target_tracked.intersection(comp_tracked)
             shared_indices = [j for j, f in enumerate(features_subset) if f in shared]
@@ -583,23 +621,29 @@ class SimilarityEngine:
             
             sim = cosine_similarity(v1, v2)[0][0]
             
-            # Find Primary Match Drivers (Top 3 lowest weighted Euclidean distances)
-            # We want to explain WHY they match.
-            # Using weighted distance emphasizes the features that mattered most in the cosine calc
+            # Find Primary Match Drivers (Shared Excellence)
+            # We want to identify top 3 features with High Percentiles in BOTH players + Low Distance
             
-            # Extract relevant weights for shared features
-            shared_weights = norm_weights[shared_indices]
+            # 1. Get stats
+            distances_local = np.abs(v1 - v2).flatten()
+            shared_feats_list = [features_subset[x] for x in shared_indices]
             
-            # Weighted difference
-            # (Difference * Weight) gives magnitude of mismatch adjusted for importance
-            diffs = np.abs(v1 - v2).flatten() * shared_weights
+            driver_scores = []
+            for k, feat in enumerate(shared_feats_list):
+                 # Get percentiles (slow access but needed for logic)
+                 p1 = target_row.get(f"{feat}_pct", 50)
+                 p2 = row.get(f"{feat}_pct", 50)
+                 dist = distances_local[k]
+                 
+                 # Same formula as calculate_feature_attribution
+                 score = (p1 + p2) - (dist * 25)
+                 driver_scores.append((feat, score))
             
-            # Sort by smallest difference (closest match on important features)
-            sorted_indices = np.argsort(diffs)
+            # Sort by score desc
+            driver_scores.sort(key=lambda x: x[1], reverse=True)
             
-            # Get top 3
-            top_3_indices = sorted_indices[:3]
-            top_3_feats = [features_subset[shared_indices[j]] for j in top_3_indices]
+            # Pick top 3
+            top_3_feats = [x[0] for x in driver_scores[:3]]
             top_3_labels = [RADAR_LABELS.get(f, f) for f in top_3_feats]
             
             driver_str = "Driven by " + ", ".join(top_3_labels)
@@ -611,9 +655,10 @@ class SimilarityEngine:
             # Aggressive Coverage Penalty
             coverage = len(shared) / len(target_tracked)
             if coverage < 1.0:
-                sim *= (coverage ** 2)
+                sim *= (coverage ** 2.0) # Quadratic penalty for missing data
             
             final_sim_score = sim * 100
+            if final_sim_score < 0: final_sim_score = 0
             
             if final_sim_score > 95:
                 driver_str += " (Stylistic Twin)"

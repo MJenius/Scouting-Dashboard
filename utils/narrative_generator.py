@@ -18,7 +18,9 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple
 from .constants import (
     ARCHETYPES,
+    ARCHETYPES,
     FEATURE_COLUMNS,
+    GK_FEATURE_COLUMNS,
     OFFENSIVE_FEATURES,
     POSSESSION_FEATURES,
     LEAGUE_TIERS,
@@ -154,8 +156,12 @@ class ScoutNarrativeGenerator:
         strengths = []
         percentile_data = []
         
+        # Determine feature set based on position
+        is_gk = player_data.get('Primary_Pos') == 'GK'
+        features_to_check = GK_FEATURE_COLUMNS if is_gk else FEATURE_COLUMNS
+        
         # Collect percentile rankings
-        for feat in FEATURE_COLUMNS:
+        for feat in features_to_check:
             pct_col = f'{feat}_pct'
             if pct_col in player_data.index and not pd.isna(player_data[pct_col]):
                 percentile_data.append((feat, player_data[pct_col], player_data[feat]))
@@ -186,8 +192,12 @@ class ScoutNarrativeGenerator:
         weaknesses = []
         percentile_data = []
         
+        # Determine feature set based on position
+        is_gk = player_data.get('Primary_Pos') == 'GK'
+        features_to_check = GK_FEATURE_COLUMNS if is_gk else FEATURE_COLUMNS
+        
         # Collect percentile rankings
-        for feat in FEATURE_COLUMNS:
+        for feat in features_to_check:
             pct_col = f'{feat}_pct'
             if pct_col in player_data.index and not pd.isna(player_data[pct_col]):
                 percentile_data.append((feat, player_data[pct_col], player_data[feat]))
@@ -338,6 +348,10 @@ class ScoutNarrativeGenerator:
             'TklW/90': f"{tier} tackle success rate ({value:.2f} tackles won/90, {percentile:.0f}th percentile) indicates defensive reliability",
             'Fls/90': f"Aggressive approach ({value:.2f} fouls/90, {percentile:.0f}th percentile) demonstrates physical commitment",
             'Fld/90': f"Ability to draw fouls ({value:.2f} fouls drawn/90, {percentile:.0f}th percentile) suggests good ball retention under pressure",
+            'GA90': f"{tier} shot-stopping ({value:.2f} goals against/90, {percentile:.0f}th percentile) indicates elite goal prevention",
+            'Save%': f"{tier} save reliability ({value:.1f}%, {percentile:.0f}th percentile) shows consistent handling and reflexes",
+            'CS%': f"{tier} shutdown ability ({value:.1f}% clean sheets, {percentile:.0f}th percentile) demonstrates match-winning value",
+            'Saves': f"High workload management ({value:.1f} saves/90, {percentile:.0f}th percentile) proves reliability under pressure",
         }
         
         return metric_insights.get(metric, f"{metric}: {value:.2f} ({percentile:.0f}th percentile)")
@@ -354,6 +368,9 @@ class ScoutNarrativeGenerator:
             'TklW/90': f"Tackle success ({value:.2f}/90, {percentile:.0f}th percentile) below average - defensive technique needs refinement",
             'Fls/90': f"Foul frequency ({value:.2f}/90, {percentile:.0f}th percentile) may indicate discipline issues",
             'Fld/90': f"Fouls drawn ({value:.2f}/90, {percentile:.0f}th percentile) suggests difficulty retaining possession under pressure",
+            'GA90': f"Goals conceded ({value:.2f}/90, {percentile:.0f}th percentile) is high relative to league peers",
+            'Save%': f"Save percentage ({value:.1f}%, {percentile:.0f}th percentile) indicates need for better shot-stopping consistency",
+            'CS%': f"Clean sheet rate ({value:.1f}%, {percentile:.0f}th percentile) suggests struggle to close out games",
         }
         
         return metric_weaknesses.get(metric, f"{metric}: {value:.2f} ({percentile:.0f}th percentile)")
@@ -364,16 +381,23 @@ class ScoutNarrativeGenerator:
             'FW': ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Fld/90'],
             'MF': ['Ast/90', 'Crs/90', 'Int/90', 'TklW/90', 'Gls/90'],
             'DF': ['Int/90', 'TklW/90', 'Crs/90', 'Fls/90'],
-            'GK': [],  # Goalkeeper metrics handled separately
+            'GK': GK_FEATURE_COLUMNS,
         }
         
-        return metric in relevant_metrics.get(position, FEATURE_COLUMNS)
+        relevant = relevant_metrics.get(position)
+        if relevant is None:
+             # Fallback
+             return metric in (GK_FEATURE_COLUMNS if position == 'GK' else FEATURE_COLUMNS)
+        return metric in relevant
     
     def _get_avg_percentile(self, player_data: pd.Series) -> float:
         """Calculate average percentile across all available metrics."""
         percentiles = []
         
-        for feat in FEATURE_COLUMNS:
+        is_gk = player_data.get('Primary_Pos') == 'GK'
+        features_to_check = GK_FEATURE_COLUMNS if is_gk else FEATURE_COLUMNS
+        
+        for feat in features_to_check:
             pct_col = f'{feat}_pct'
             if pct_col in player_data.index and not pd.isna(player_data[pct_col]):
                 percentiles.append(player_data[pct_col])
@@ -393,8 +417,10 @@ class ScoutNarrativeGenerator:
         # Collect percentile data
         percentiles = []
         position = player_data.get('Primary_Pos', 'MF')
-        
-        for feat in FEATURE_COLUMNS:
+        is_gk = position == 'GK'
+        features_to_check = GK_FEATURE_COLUMNS if is_gk else FEATURE_COLUMNS
+
+        for feat in features_to_check:
             pct_col = f'{feat}_pct'
             if pct_col in player_data.index and not pd.isna(player_data[pct_col]):
                 percentiles.append(player_data[pct_col])
