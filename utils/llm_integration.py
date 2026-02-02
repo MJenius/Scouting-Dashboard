@@ -1,275 +1,332 @@
 """
-llm_integration.py - LLM-powered scouting narrative generation using Google Gemini.
+llm_integration.py - Local LLM integration using Ollama (OpenAI-compatible API).
 
 This module provides:
-- Context-aware scouting summaries using Gemini API
-- Fallback to rule-based generator if API unavailable
-- Prompt engineering for professional scouting language
-- Caching to reduce API calls
+- Agentic Chat implementation (Text-to-JSON filters)
+- Context-aware scouting narratives using local models (Llama 3, Mistral)
+- Fallback to rule-based generation if Ollama is offline
+
+Configuration:
+- Base URL: http://localhost:11434/v1
+- Model: llama3 (default), mistral, or any pulled Ollama model
 """
 
 import os
-from typing import Optional, Dict
+import json
+import logging
+import requests
 import pandas as pd
+from typing import Optional, Dict, List, Any, Tuple
+from datetime import datetime
 
+# Import OpenAI client for Ollama compatibility
 try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
 except ImportError:
-    GEMINI_AVAILABLE = False
+    OPENAI_AVAILABLE = False
 
 from .narrative_generator import ScoutNarrativeGenerator
 
+# Setup logging
+logger = logging.getLogger(__name__)
+
+# ============================================================================
+# CONSTANTS & MAPPINGS
+# ============================================================================
+
+OLLAMA_BASE_URL = "http://localhost:11434/v1"
+DEFAULT_MODEL = "llama3"
+
+# Strict mapping: Natural language terms → Database stat keys
+STAT_KEY_MAPPING = {
+    # Offensive terms
+    'goalscorer': {'scouting': 'Gls/90_Dominance', 'filter': 'Gls/90', 'display': 'Goals/90'},
+    'striker': {'scouting': 'Gls/90_Dominance', 'filter': 'Gls/90', 'display': 'Goals/90'},
+    'finisher': {'scouting': 'Gls/90_Dominance', 'filter': 'Gls/90', 'display': 'Goals/90'},
+    'clinical': {'scouting': 'Finishing_Efficiency', 'filter': 'Finishing_Efficiency', 'display': 'Finishing Efficiency'},
+    
+    # Creative terms
+    'creative': {'scouting': 'xA90_Dominance', 'filter': 'xA90', 'display': 'xA/90'},
+    'playmaker': {'scouting': 'Ast/90_Dominance', 'filter': 'Ast/90', 'display': 'Assists/90'},
+    'creator': {'scouting': 'xA90_Dominance', 'filter': 'xA90', 'display': 'xA/90'},
+    
+    # Defensive terms
+    'defender': {'scouting': 'TklW/90_Dominance', 'filter': 'TklW/90', 'display': 'Tackles Won/90'},
+    'ball winner': {'scouting': 'TklW/90_Dominance', 'filter': 'TklW/90', 'display': 'Tackles Won/90'},
+    'interceptor': {'scouting': 'Int/90_Dominance', 'filter': 'Int/90', 'display': 'Interceptions/90'},
+    
+    # Expected metrics
+    'xg': {'scouting': 'xG90_Dominance', 'filter': 'xG90', 'display': 'xG/90'},
+    'xa': {'scouting': 'xA90_Dominance', 'filter': 'xA90', 'display': 'xA/90'},
+}
+
+# Database schema description for System Prompt
+SYSTEM_PROMPT_FILTER = """You are a football scouting assistant. 
+Output ONLY valid JSON. No markdown, no explanations, no chat.
+
+Your task is to convert the user's scouting query into a JSON filter object.
+
+AVAILABLE SCHEMA (Use only these keys):
+{
+    "min_age": int,
+    "max_age": int,
+    "league": str (Exact match: 'Premier League', 'Championship', 'League One', 'League Two', 'National League', 'Bundesliga', 'La Liga', 'Serie A', 'Ligue 1'),
+    "position": str (Exact match: 'FW', 'MF', 'DF', 'GK'),
+    "min_goals": float (maps to Gls/90),
+    "min_assists": float (maps to Ast/90),
+    "min_xg": float (maps to xG90),
+    "min_xa": float (maps to xA90),
+    "min_dominance": float (Z-score, e.g. 1.0 = good, 2.0 = elite)
+}
+
+MAPPING RULES:
+- "Young" -> {"max_age": 23}
+- "Prime" or "Peak" -> {"min_age": 24, "max_age": 29}
+- "Experienced" -> {"min_age": 30}
+- "Striker" -> {"position": "FW"}
+- "Midfielder" -> {"position": "MF"}
+- "Defender" -> {"position": "DF"}
+- "Keeper" -> {"position": "GK"}
+- "Prolific" -> {"min_goals": 0.5}
+- "Creative" -> {"min_xa": 0.25}
+- "Solid" -> {"min_dominance": 0.5}
+- "Elite" or "God-tier" -> {"min_dominance": 2.0}
+
+Example User Input: "Find me a young striker in the Premier League who is prolific"
+Example JSON Output: {"max_age": 23, "position": "FW", "league": "Premier League", "min_goals": 0.5}
+"""
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def is_ollama_available() -> bool:
+    """Check if Ollama is running and accessible."""
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=2)
+        return response.status_code == 200
+    except requests.exceptions.RequestException:
+        return False
+
+def get_available_models() -> List[str]:
+    """Get list of available Ollama models."""
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=2)
+        if response.status_code == 200:
+            data = response.json()
+            return [model['name'] for model in data.get('models', [])]
+        return []
+    except:
+        return []
+
+# ============================================================================
+# AGENTIC CHAT CLASS
+# ============================================================================
+
+class AgenticScoutChat:
+    """
+    Local Agentic Chat for converting natural language queries into API filters.
+    Uses Ollama (Llama 3 / Mistral) via OpenAI compatible endpoint.
+    """
+    
+    def __init__(self, model: str = DEFAULT_MODEL):
+        self.client = None
+        self.model = model
+        self.available = False
+        
+        if OPENAI_AVAILABLE and is_ollama_available():
+            try:
+                self.client = OpenAI(
+                    base_url=OLLAMA_BASE_URL,
+                    api_key="ollama"  # Required but ignored
+                )
+                self.available = True
+                
+                # Check if requested model exists, fallback if not
+                available_models = get_available_models()
+                model_base = model.split(':')[0]
+                
+                # Simple fuzzy matching for model availability
+                if not any(model in m or model_base in m for m in available_models):
+                    if available_models:
+                        logger.warning(f"Model {model} not found. Using {available_models[0]}")
+                        self.model = available_models[0]
+                    else:
+                        logger.warning("No models found in Ollama.")
+            except Exception as e:
+                logger.error(f"Failed to initialize AgenticChat: {e}")
+                
+    def parse_intent(self, user_query: str) -> Dict[str, Any]:
+        """
+        Convert user query to structured filter JSON.
+        """
+        if not self.available:
+            return {"error": "Local AI is offline"}
+            
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT_FILTER},
+                    {"role": "user", "content": user_query}
+                ],
+                temperature=0.1,  # Low temperature for deterministic JSON
+                max_tokens=150,
+                response_format={"type": "json_object"}  # Structured Output
+            )
+            
+            content = response.choices[0].message.content
+            
+            # Additional JSON cleaning if model outputs markdown code blocks
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].strip()
+                
+            return json.loads(content)
+            
+        except Exception as e:
+            logger.error(f"Intent parsing failed: {e}")
+            return {"error": str(e)}
+
+    def get_api_params(self, filters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert internal JSON filters to actual API parameter names.
+        """
+        params = {}
+        
+        # Direct mappings
+        if 'min_age' in filters: params['min_age'] = filters['min_age']
+        if 'max_age' in filters: params['max_age'] = filters['max_age']
+        if 'league' in filters: params['league'] = filters['league']
+        if 'position' in filters: params['position'] = filters['position']
+        
+        # Stat mappings
+        if 'min_goals' in filters: params['min_gls_90'] = filters['min_goals']
+        if 'min_assists' in filters: params['min_ast_90'] = filters['min_assists']
+        if 'min_xg' in filters: params['min_xg_90'] = filters['min_xg']
+        if 'min_xa' in filters: params['min_xa_90'] = filters['min_xa']
+        
+        # Dominance mapping (advanced)
+        if 'min_dominance' in filters:
+            # We need to decide which metric this dominance applies to
+            # API doesn't have a generic "dominance" filter yet, 
+            # so we might implement logic in the frontend to filter the results dataframe
+            params['min_dominance'] = filters['min_dominance']
+            
+        return params
+
+
+# ============================================================================
+# NARRATIVE GENERATOR CLASS
+# ============================================================================
 
 class LLMScoutNarrativeGenerator:
     """
-    Generate context-aware scouting narratives using Google Gemini API.
-    
-    Features:
-    - Professional scouting language
-    - Context-aware analysis (league, age, archetype)
-    - Strengths/weaknesses identification
-    - Tactical insights
-    - Fallback to rule-based generator
+    Generate scouting narratives using Local LLM (Ollama).
+    Falls back to rule-based generator if offline.
     """
     
-    def __init__(self, api_key: Optional[str] = None, use_llm: bool = True):
-        """
-        Initialize LLM narrative generator.
+    def __init__(self, model: str = DEFAULT_MODEL):
+        self.fallback = ScoutNarrativeGenerator()
+        self.client = None
+        self.model = model
+        self.available = False
         
-        Args:
-            api_key: Google Gemini API key (or set GEMINI_API_KEY env var)
-            use_llm: Whether to use LLM (False = always use rule-based)
-        """
-        self.use_llm = use_llm and GEMINI_AVAILABLE
-        self.fallback_generator = ScoutNarrativeGenerator()
-        self.model = None
-        
-        if not GEMINI_AVAILABLE:
-            print("google-generativeai package not installed. AI features disabled.")
-            self.use_llm = False
-            return
-        
-        if self.use_llm:
-            # Get API key from parameter or environment
-            api_key = api_key or os.getenv('GEMINI_API_KEY')
-            
-            if api_key:
-                print(f"API key found (starts with: {api_key[:10]}...)")
-                try:
-                    genai.configure(api_key=api_key)
-                    # Use Gemini 2.5 Flash (latest stable model)
-                    # Note: Must use full path 'models/gemini-2.5-flash'
-                    self.model = genai.GenerativeModel('models/gemini-2.5-flash')
-                    print("Gemini API initialized successfully with gemini-2.5-flash")
-                except Exception as e:
-                    print(f"Gemini API initialization failed: {e}")
-                    print("Falling back to rule-based narrative generation")
-                    self.use_llm = False
-            else:
-                print("No Gemini API key found in environment or parameters.")
-                print("Please set GEMINI_API_KEY in your .env file.")
-                self.use_llm = False
-    
-    def _build_prompt(
-        self,
-        player_data: pd.Series,
-        top_strengths: list,
-        weaknesses: list,
-        archetype: str,
-        league: str,
-        age: int,
-    ) -> str:
-        """
-        Build prompt for Gemini API.
-        
-        Args:
-            player_data: Player statistics
-            top_strengths: Top 3 statistical strengths
-            weaknesses: Top 2 statistical weaknesses
-            archetype: Player archetype
-            league: League name
-            age: Player age
-            include_value: Include market value context
-            
-        Returns:
-            Formatted prompt string
-        """
-        # Extract key stats
-        position = player_data.get('Primary_Pos', 'Unknown')
-        squad = player_data.get('Squad', 'Unknown')
-        gls_90 = player_data.get('Gls/90', 0)
-        ast_90 = player_data.get('Ast/90', 0)
-        
-        # Extract efficiency metrics
-        fin_eff = player_data.get('Finishing_Efficiency', 0.0)
-        creat_eff = player_data.get('Creative_Efficiency', 0.0)
-        age_z = player_data.get('Age_Z_Score_GA90', 0.0)
-        
-        # Build context
-        prompt = f"""You are a professional football scout writing a concise scouting report.
-
-**Player Profile:**
-- Position: {position}
-- Age: {age}
-- Club: {squad}
-- League: {league}
-- Archetype: {archetype}
-
-**Performance Indicators:**
-- Goals/90: {gls_90:.2f}
-- Assists/90: {ast_90:.2f}
-- Finishing Efficiency (Goals - xG): {fin_eff:+.2f}
-- Creative Efficiency (Ast - xA): {creat_eff:+.2f}
-- Age Z-Score (G+A/90 vs cohort): {age_z:+.2f}
-
-**Statistical Strengths:**
-{chr(10).join([f'- {s}' for s in top_strengths])}
-
-**Areas for Development:**
-{chr(10).join([f'- {w}' for w in weaknesses])}
-
-**Instructions:**
-Write a 3 sentence professional scouting summary.
-1. Analyze if this player is a high-potential outlier or a high-variance risk based on their xG overperformance (Efficiency metrics).
-2. Contextualize their performance relative to their age (using Age Z-Score).
-3. Mention their tactical fit based on archetype.
-
-**Tone:** Professional, analytical, balanced.
-**Length:** Around 50-60 words (strictly 3 sentences).
-**Format:** Plain text paragraph.
-
-**Example Style:**
-"This advanced playmaker shows unsustainable finishing efficiency (+0.45), suggesting regression risk despite elite creative numbers. However, his Age Z-Score of +2.1 ranks him as a standout generational talent amongst U23s in the Bundesliga. Defensively, he requires a high-pressing system to mask his limited recovery pace."
-
-Write the scouting summary:"""
-        
-        return prompt
-    
-    def generate_narrative(
-        self,
-        player_data: pd.Series,
-        max_retries: int = 2,
-    ) -> str:
-        """
-        Generate scouting narrative using LLM.
-        
-        Args:
-            player_data: Player statistics
-            include_value: Include market value context
-            max_retries: Number of API retry attempts
-            
-        Returns:
-            Scouting narrative string
-            
-        Raises:
-            RuntimeError: If LLM is not available or API call fails
-        """
-        # Check if LLM is available
-        if not self.use_llm or self.model is None:
-            raise RuntimeError(
-                "AI narrative generation is not available. "
-                "Please ensure GEMINI_API_KEY is set in your .env file and google-generativeai is installed."
+        if OPENAI_AVAILABLE and is_ollama_available():
+            self.client = OpenAI(
+                base_url=OLLAMA_BASE_URL,
+                api_key="ollama"
             )
+            self.available = True
+            
+            # Ensure model selection logic (same as AgenticChat)
+            available_models = get_available_models()
+            model_base = model.split(':')[0]
+            if not any(model in m or model_base in m for m in available_models):
+                if available_models:
+                    self.model = available_models[0]
+
+    def _build_prompt(self, player_data: pd.Series, strengths: List[str], weaknesses: List[str]) -> str:
+        """Create the scouting report prompt."""
+        
+        name = player_data.get('Player', 'The player')
+        pos = player_data.get('Primary_Pos', 'Unknown')
+        league = player_data.get('League', 'Unknown')
+        age = player_data.get('Age', 'Unknown')
+        archetype = player_data.get('Archetype', 'Unknown')
+        
+        # Dominance stats if available
+        dom_context = ""
+        dom_cols = [c for c in player_data.index if '_Dominance' in c]
+        if dom_cols:
+             top_dom = player_data[dom_cols].astype(float).sort_values(ascending=False).head(1)
+             if not top_dom.empty:
+                 metric = top_dom.index[0].replace('_Dominance', '')
+                 z_score = top_dom.iloc[0]
+                 dom_context = f"\n- Dominance: {z_score:+.2f} Z-score for {metric} (League Context)"
+
+        prompt = f"""You are a professional football scout. Write a 3-sentence scouting summary for:
+        
+Name: {name}
+Age: {age}
+Position: {pos}
+Club/League: {player_data.get('Squad', '')} ({league})
+Archetype: {archetype}
+
+Key Stats:
+- Goals/90: {player_data.get('Gls/90', 0):.2f}
+- Assists/90: {player_data.get('Ast/90', 0):.2f}
+{dom_context}
+
+Strengths: {', '.join(strengths)}
+Weaknesses: {', '.join(weaknesses)}
+
+Instructions:
+1. Synthesize the strengths/weaknesses and archetype into a cohesive narrative.
+2. Mention if they are over/under-performing based on age or dominance.
+3. Keep it strictly 3 sentences. Professional tone. No fluff.
+
+Summary:"""
+        return prompt
+
+    def generate_narrative(self, player_data: pd.Series) -> str:
+        """Generate narrative with fallback."""
+        if not self.available:
+            return self.fallback.generate_narrative(player_data)
         
         try:
-            # Extract player info
-            archetype = player_data.get('Archetype', 'Unknown')
-            league = player_data.get('League', 'Unknown')
-            age = int(player_data.get('Age', 0))
-            position = player_data.get('Primary_Pos', 'Unknown')
+            # Get simple strengths/weaknesses for prompt
+            # (Reusing logic would be better, but quick implementation here)
+            # Simulating basic strength finding:
+            dict_data = player_data.to_dict()
+            strengths = [k for k,v in dict_data.items() if '_pct' in k and isinstance(v, (int, float)) and v > 80][:3]
+            weaknesses = [k for k,v in dict_data.items() if '_pct' in k and isinstance(v, (int, float)) and v < 30][:2]
             
-            # Identify strengths and weaknesses
-            strengths, weaknesses = self._identify_strengths_weaknesses(player_data, position)
+            prompt = self._build_prompt(player_data, strengths, weaknesses)
             
-            # Build prompt
-            prompt = self._build_prompt(
-                player_data,
-                strengths,
-                weaknesses,
-                archetype,
-                league,
-                age,
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=100
             )
+            return response.choices[0].message.content.strip()
             
-            # Call Gemini API
-            response = self.model.generate_content(prompt)
-            
-            if response and response.text:
-                narrative = response.text.strip()
-                return narrative
-            else:
-                raise ValueError("Empty response from Gemini API")
-        
         except Exception as e:
-            # Re-raise with more context
-            raise RuntimeError(f"AI narrative generation failed: {str(e)}")
-    
-    def _identify_strengths_weaknesses(
-        self,
-        player_data: pd.Series,
-        position: str,
-    ) -> tuple:
-        """
-        Identify top strengths and weaknesses from percentile data.
-        
-        Args:
-            player_data: Player statistics
-            position: Player position
-            
-        Returns:
-            Tuple of (strengths_list, weaknesses_list)
-        """
-        # Get percentile columns
-        pct_cols = [col for col in player_data.index if col.endswith('_pct')]
-        
-        if len(pct_cols) == 0:
-            return (["Statistical data limited"], ["Further analysis required"])
-        
-        # Get percentile values
-        percentiles = {col.replace('_pct', ''): player_data[col] for col in pct_cols}
-        
-        # Sort by percentile
-        sorted_pcts = sorted(percentiles.items(), key=lambda x: x[1], reverse=True)
-        
-        # Top 3 strengths (>75th percentile)
-        strengths = []
-        for metric, pct in sorted_pcts[:5]:
-            if pct >= 75:
-                strengths.append(f"{metric} ({pct:.0f}th percentile)")
-        
-        # Top 2 weaknesses (<40th percentile)
-        weaknesses = []
-        for metric, pct in sorted_pcts[-5:]:
-            if pct < 40:
-                weaknesses.append(f"{metric} ({pct:.0f}th percentile)")
-        
-        # Defaults if none found
-        if len(strengths) == 0:
-            strengths = ["Balanced statistical profile"]
-        
-        if len(weaknesses) == 0:
-            weaknesses = ["No significant weaknesses identified"]
-        
-        return (strengths[:3], weaknesses[:2])
+            logger.error(f"Local AI Narrative Failed: {e}")
+            return self.fallback.generate_narrative(player_data)
 
 
-def generate_llm_narrative(
-    player_data: pd.Series,
-    api_key: Optional[str] = None,
-    use_llm: bool = True,
-) -> str:
-    """
-    Convenience function to generate LLM narrative.
+# ============================================================================
+# CONVENIENCE FUNCTION
+# ============================================================================
+
+def generate_llm_narrative(player_data: pd.Series, use_llm: bool = True) -> str:
+    """Wrapper for external calls."""
+    if not use_llm:
+        return ScoutNarrativeGenerator().generate_narrative(player_data)
     
-    Args:
-        player_data: Player statistics
-        include_value: Include market value context
-        api_key: Google Gemini API key
-        use_llm: Whether to use LLM (False = rule-based only)
-        
-    Returns:
-        Scouting narrative string
-    """
-    generator = LLMScoutNarrativeGenerator(api_key=api_key, use_llm=use_llm)
+    generator = LLMScoutNarrativeGenerator()
     return generator.generate_narrative(player_data)

@@ -38,6 +38,10 @@ from utils import (
 )
 from utils.visualizations import PlotlyVisualizations
 from utils.recruitment_logic import project_to_tier
+from utils.llm_integration import AgenticScoutChat, is_ollama_available, generate_llm_narrative
+import plotly.express as px
+import plotly.graph_objects as go
+from typing import Optional, Dict, List
 
 # Import API client for FastAPI backend integration
 try:
@@ -247,11 +251,339 @@ with st.sidebar:
         st.info("Running in Local Mode")
         st.caption("API client not installed")
     
+    # Local AI Status
+    st.divider()
+    st.subheader("Local AI (Ollama)")
+    
+    if is_ollama_available():
+        st.success("Local AI: Online")
+        st.caption("Ready for Agentic Chat & Narratives")
+    else:
+        st.error("Local AI: Offline")
+        st.caption("Start Ollama to enable AI features")
+    
     st.divider()
     if st.button("Reset Cache & Reload Data", use_container_width=True):
         st.cache_data.clear()
         st.session_state.data_loaded = False
         st.rerun()
+
+# ============================================================================
+# SQUAD ANALYSIS & PLANNER HELPERS
+# ============================================================================
+
+# 4-3-3 Coordinates for Plotly Pitch (0-100 scale)
+PITCH_COORDS = {
+    'GK':  (50, 5),
+    'RB':  (85, 25), 'RCB': (60, 25), 'LCB': (40, 25), 'LB': (15, 25),
+    'CDM': (50, 45), 'RCM': (70, 60), 'LCM': (30, 60),
+    'RW':  (85, 85), 'ST':  (50, 90), 'LW':  (15, 85)
+}
+
+def get_squad_roster(df: pd.DataFrame, squad_name: str) -> pd.DataFrame:
+    """Get all players in a specific squad."""
+    return df[df['Squad'] == squad_name].copy()
+
+def get_archetype_distribution(squad_df: pd.DataFrame) -> Dict[str, int]:
+    """Calculate archetype distribution for a squad."""
+    if 'Archetype' not in squad_df.columns:
+        return {}
+    return squad_df['Archetype'].value_counts().to_dict()
+
+def get_squad_top_11(squad_df: pd.DataFrame) -> pd.DataFrame:
+    """Get top 11 players by minutes played (90s)."""
+    return squad_df.nlargest(11, '90s')
+
+def calculate_squad_mean_percentiles(squad_df: pd.DataFrame) -> Dict[str, float]:
+    """Calculate mean percentile scores for the squad's top 11."""
+    top_11 = get_squad_top_11(squad_df)
+    
+    # Only calculate for outfield players
+    outfield = top_11[top_11['Primary_Pos'] != 'GK']
+    
+    percentiles = {}
+    from utils.constants import FEATURE_COLUMNS # Ensure this is available
+    for feat in FEATURE_COLUMNS[:9]:  # Core 9 metrics for comparison
+        pct_col = f'{feat}_pct'
+        if pct_col in outfield.columns:
+            percentiles[feat] = outfield[pct_col].mean()
+    
+    return percentiles
+
+def calculate_league_mean_percentiles(df: pd.DataFrame, league: str) -> Dict[str, float]:
+    """Calculate mean percentile scores for the entire league."""
+    league_df = df[df['League'] == league]
+    outfield = league_df[league_df['Primary_Pos'] != 'GK']
+    
+    percentiles = {}
+    from utils.constants import FEATURE_COLUMNS
+    for feat in FEATURE_COLUMNS[:9]:
+        pct_col = f'{feat}_pct'
+        if pct_col in outfield.columns:
+            percentiles[feat] = outfield[pct_col].mean()
+    
+    return percentiles
+
+def calculate_squad_dominance_summary(squad_df: pd.DataFrame) -> Dict[str, float]:
+    """Calculate average dominance scores for the squad."""
+    dominance_cols = [col for col in squad_df.columns if '_Dominance' in col]
+    
+    summary = {}
+    for col in dominance_cols:
+        metric_name = col.replace('_Dominance', '')
+        summary[metric_name] = squad_df[col].mean()
+    
+    return summary
+
+def create_archetype_pie_chart(archetype_dist: Dict[str, int], squad_name: str) -> go.Figure:
+    """Create a pie chart of archetype distribution."""
+    if not archetype_dist:
+        return None
+    
+    labels = list(archetype_dist.keys())
+    values = list(archetype_dist.values())
+    
+    # Color palette
+    colors = px.colors.qualitative.Set3[:len(labels)]
+    
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        hole=0.4,
+        marker=dict(colors=colors),
+        textinfo='label+percent',
+        textposition='outside',
+        pull=[0.05 if v == max(values) else 0 for v in values]
+    )])
+    
+    fig.update_layout(
+        title=dict(
+            text=f"Tactical DNA: {squad_name}",
+            x=0.5,
+            font=dict(size=18)
+        ),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.2,
+            xanchor="center",
+            x=0.5
+        ),
+        height=450,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+    )
+    
+    return fig
+
+def create_age_histogram(squad_df: pd.DataFrame, league_df: pd.DataFrame, squad_name: str) -> go.Figure:
+    """Create age histogram comparing squad to league average."""
+    fig = go.Figure()
+    
+    # Squad ages
+    fig.add_trace(go.Histogram(
+        x=squad_df['Age'],
+        name=squad_name,
+        opacity=0.7,
+        marker_color='#4CAF50',
+        nbinsx=15
+    ))
+    
+    # League ages
+    fig.add_trace(go.Histogram(
+        x=league_df['Age'],
+        name='League Average',
+        opacity=0.4,
+        marker_color='#2196F3',
+        nbinsx=15
+    ))
+    
+    # Add vertical lines for means
+    squad_mean = squad_df['Age'].mean()
+    league_mean = league_df['Age'].mean()
+    
+    fig.add_vline(x=squad_mean, line_dash="dash", line_color="#4CAF50",
+                  annotation_text=f"Squad: {squad_mean:.1f}")
+    fig.add_vline(x=league_mean, line_dash="dash", line_color="#2196F3",
+                  annotation_text=f"League: {league_mean:.1f}")
+    
+    fig.update_layout(
+        title=dict(
+            text=f"Age Distribution: {squad_name} vs League",
+            x=0.5,
+            font=dict(size=16)
+        ),
+        xaxis_title="Age",
+        yaxis_title="Number of Players",
+        barmode='overlay',
+        height=400,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+    )
+    
+    return fig
+
+def create_squad_radar(squad_pcts: Dict[str, float], league_pcts: Dict[str, float], squad_name: str) -> go.Figure:
+    """Create radar chart comparing squad to league averages."""
+    categories = list(squad_pcts.keys())
+    
+    fig = go.Figure()
+    
+    # Squad values
+    squad_values = [squad_pcts.get(cat, 50) for cat in categories]
+    squad_values.append(squad_values[0])  # Close the polygon
+    
+    # League values
+    league_values = [league_pcts.get(cat, 50) for cat in categories]
+    league_values.append(league_values[0])
+    
+    categories_closed = categories + [categories[0]]
+    
+    fig.add_trace(go.Scatterpolar(
+        r=squad_values,
+        theta=categories_closed,
+        fill='toself',
+        name=f'{squad_name} (Top 11)',
+        line_color='#4CAF50',
+        fillcolor='rgba(76, 175, 80, 0.3)'
+    ))
+    
+    fig.add_trace(go.Scatterpolar(
+        r=league_values,
+        theta=categories_closed,
+        fill='toself',
+        name='League Average',
+        line_color='#2196F3',
+        fillcolor='rgba(33, 150, 243, 0.2)'
+    ))
+    
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100]
+            )
+        ),
+        title=dict(
+            text=f"Squad Profile: {squad_name}",
+            x=0.5,
+            font=dict(size=16)
+        ),
+        showlegend=True,
+        height=500,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+    )
+    
+    return fig
+
+def create_dominance_bar_chart(dominance_summary: Dict[str, float], squad_name: str) -> go.Figure:
+    """Create bar chart of squad's average dominance scores."""
+    if not dominance_summary:
+        return None
+    
+    metrics = list(dominance_summary.keys())
+    values = list(dominance_summary.values())
+    
+    # Color based on positive/negative
+    colors = ['#4CAF50' if v > 0 else '#f44336' for v in values]
+    
+    fig = go.Figure(data=[
+        go.Bar(
+            x=metrics,
+            y=values,
+            marker_color=colors,
+            text=[f'{v:.2f}' for v in values],
+            textposition='outside'
+        )
+    ])
+    
+    fig.add_hline(y=0, line_dash="solid", line_color="white", line_width=1)
+    
+    fig.update_layout(
+        title=dict(
+            text=f"League Dominance: {squad_name}",
+            x=0.5,
+            font=dict(size=16)
+        ),
+        xaxis_title="Metric",
+        yaxis_title="Dominance Z-Score",
+        height=400,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+    )
+    
+    return fig
+
+def create_pitch_visualization(shadow_squad):
+    """Create a football pitch with player markers."""
+    fig = go.Figure()
+    
+    # Draw Pitch Outline
+    fig.add_shape(type="rect", x0=0, y0=0, x1=100, y1=100,
+                  line=dict(color="white", width=2), fillcolor="rgba(0,0,0,0)")
+    
+    # Half-way line
+    fig.add_shape(type="line", x0=0, y0=50, x1=100, y1=50,
+                  line=dict(color="white", width=1, dash="dot"))
+    
+    # Penalty Areas (approx)
+    fig.add_shape(type="rect", x0=20, y0=0, x1=80, y1=16,
+                  line=dict(color="white", width=1))
+    fig.add_shape(type="rect", x0=20, y0=84, x1=80, y1=100,
+                  line=dict(color="white", width=1))
+    
+    # Player Markers
+    x_vals = []
+    y_vals = []
+    text_vals = []
+    colors = []
+    hover_texts = []
+    
+    for pos, player_data in shadow_squad.items():
+        x, y = PITCH_COORDS.get(pos, (50, 50))
+        x_vals.append(x)
+        y_vals.append(y)
+        
+        if player_data:
+            name = player_data['Player']
+            squad = player_data.get('Squad', 'Unknown')
+            age = player_data.get('Age', '')
+            # Dom score if available
+            dom = player_data.get('Gls/90_Dominance', 0) if pos in ['ST', 'RW', 'LW'] else 0
+            
+            text_vals.append(f"<b>{pos}</b><br>{name}")
+            colors.append('#4CAF50')  # Green for filled
+            hover_texts.append(f"{name} ({age})<br>{squad}<br>Dominance: {dom:.2f}")
+        else:
+            text_vals.append(f"<b>{pos}</b><br>Empty")
+            colors.append('#333333')  # Grey for empty
+            hover_texts.append("Click to add player")
+            
+    fig.add_trace(go.Scatter(
+        x=x_vals,
+        y=y_vals,
+        mode='markers+text',
+        marker=dict(size=40, color=colors, line=dict(color='white', width=1)),
+        text=text_vals,
+        textposition="bottom center",
+        textfont=dict(color='white'),
+        hovertext=hover_texts,
+        hoverinfo='text'
+    ))
+    
+    fig.update_layout(
+        xaxis=dict(showgrid=False, zeroline=False, visible=False, range=[-5, 105]),
+        yaxis=dict(showgrid=False, zeroline=False, visible=False, range=[-5, 105]),
+        height=600,
+        plot_bgcolor='#1a1a1a',
+        paper_bgcolor='#1a1a1a',
+        margin=dict(l=10, r=10, t=10, b=10),
+        showlegend=False
+    )
+    
+    return fig
 
 # ============================================================================
 # MAIN APP
@@ -283,12 +615,14 @@ st.title("Football Scouting Dashboard")
 st.caption(f"Multi-League Global Scouting Dashboard | {len(df_filtered):,} players after filters")
 
 # Page selection
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 pages = {
     'Player Search': col1,
     'Head-to-Head': col2,
     'Hidden Gems': col3,
     'Leaderboards': col4,
+    'Squad Analysis': col5,
+    'Squad Planner': col6,
 }
 
 for page_name, col in pages.items():
@@ -301,8 +635,62 @@ st.divider()
 # PAGE 1: PLAYER SEARCH
 # ============================================================================
 
+if 'chat_messages' not in st.session_state:
+    st.session_state.chat_messages = []
+
 if st.session_state.page == 'Player Search':
     st.header("Player Search")
+    
+    # AGENTIC CHAT INTERFACE
+    with st.expander("💬 Agentic Scout Chat", expanded=False):
+        st.caption("Ask questions like 'Find me a young striker in the Premier League who is prolific'")
+        
+        # Display chat history
+        for msg in st.session_state.chat_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+        
+        # Chat input
+        if prompt := st.chat_input("Ask the AI Scout..."):
+            # Add user message
+            st.session_state.chat_messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            
+            # Process with Agentic AI
+            with st.chat_message("assistant"):
+                with st.spinner("Analyzing request..."):
+                    chat_agent = AgenticScoutChat()
+                    if chat_agent.available:
+                        filters = chat_agent.parse_intent(prompt)
+                        
+                        if "error" in filters:
+                            response_text = f"❌ Error: {filters['error']}"
+                        else:
+                            response_text = "✅ **Filters Applied:**\n"
+                            for k, v in filters.items():
+                                response_text += f"- `{k}`: {v}\n"
+                            
+                            # Update Global Filters based on AI intent
+                            # This connects the Chat to the Dashboard logic
+                            api_params = chat_agent.get_api_params(filters)
+                            
+                            if 'min_age' in api_params: st.session_state.filters['age_min'] = api_params['min_age']
+                            if 'max_age' in api_params: st.session_state.filters['age_max'] = api_params['max_age']
+                            if 'league' in api_params: st.session_state.filters['leagues'] = [api_params['league']]
+                            if 'position' in api_params: st.session_state.filters['positions'] = [api_params['position']]
+                            # Note: metric thresholds (min_goals) would need DataFrame filtering logic updates
+                            
+                            response_text += "\n*Dashboard filters have been updated.*"
+                    else:
+                        response_text = "⚠️ **Local AI is Offline.** Please start Ollama to use this feature."
+                
+                st.markdown(response_text)
+                st.session_state.chat_messages.append({"role": "assistant", "content": response_text})
+            
+            st.rerun()
+
+    st.divider()
     
     col1, col2 = st.columns([3, 1])
     
@@ -1798,6 +2186,370 @@ elif st.session_state.page == 'Leaderboards':
             use_container_width=True,
             hide_index=True
         )
+
+# ============================================================================
+# PAGE 5: SQUAD ANALYSIS
+# ============================================================================
+
+elif st.session_state.page == 'Squad Analysis':
+    st.header("Squad Analysis")
+    st.caption("Team-level tactical analysis and composition insights")
+    
+    # Use global df
+    squad_df = df  # df is already st.session_state.df_clustered
+    
+    # ============================================================================
+    # SQUAD SELECTOR
+    # ============================================================================
+
+    st.subheader("Select Squad")
+
+    # Get all unique squads with their leagues
+    squad_options = squad_df.groupby(['Squad', 'League']).size().reset_index(name='Players')
+    squad_options['Display'] = squad_options['Squad'] + " (" + squad_options['League'] + ")"
+    squad_options = squad_options.sort_values('Display')
+
+    # Search box
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        search_term = st.text_input(
+            "Search squad:",
+            placeholder="Type to search (e.g., 'Manchester', 'Arsenal')...",
+            key='squad_search'
+        )
+
+    with col2:
+        league_filter = st.selectbox(
+            "Filter by league:",
+            options=['All Leagues'] + LEAGUES,
+            key='squad_league_filter'
+        )
+
+    # Filter squad options
+    filtered_squads = squad_options.copy()
+    if search_term:
+        filtered_squads = filtered_squads[
+            filtered_squads['Squad'].str.lower().str.contains(search_term.lower())
+        ]
+    if league_filter != 'All Leagues':
+        filtered_squads = filtered_squads[filtered_squads['League'] == league_filter]
+
+    if len(filtered_squads) > 0:
+        selected_display = st.selectbox(
+            "Select squad:",
+            options=filtered_squads['Display'].tolist(),
+            key='selected_squad'
+        )
+        
+        # Extract squad name from display
+        selected_squad = selected_display.rsplit(' (', 1)[0]
+        selected_league = filtered_squads[filtered_squads['Display'] == selected_display]['League'].iloc[0]
+        
+        # Get squad roster
+        squad_roster = get_squad_roster(squad_df, selected_squad)
+        league_roster = squad_df[squad_df['League'] == selected_league]
+        
+        st.divider()
+        
+        # ========================================================================
+        # SQUAD OVERVIEW
+        # ========================================================================
+        
+        st.subheader("Squad Overview")
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            st.metric("Players", len(squad_roster))
+        with col2:
+            st.metric("Avg Age", f"{squad_roster['Age'].mean():.1f}")
+        with col3:
+            st.metric("Total 90s", f"{squad_roster['90s'].sum():.0f}")
+        with col4:
+            st.metric("Avg Gls/90", f"{squad_roster['Gls/90'].mean():.2f}")
+        with col5:
+            # Check if dominance column exists
+            if 'Gls/90_Dominance' in squad_roster.columns:
+                avg_dom = squad_roster['Gls/90_Dominance'].mean()
+                st.metric("Gls Dominance", f"{avg_dom:+.2f}")
+            else:
+                st.metric("Avg Ast/90", f"{squad_roster['Ast/90'].mean():.2f}")
+        
+        st.divider()
+        
+        # ========================================================================
+        # TACTICAL DNA (ARCHETYPE DISTRIBUTION)
+        # ========================================================================
+        
+        st.subheader("Tactical DNA")
+        st.write("Distribution of player archetypes within the squad")
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            archetype_dist = get_archetype_distribution(squad_roster)
+            if archetype_dist:
+                pie_fig = create_archetype_pie_chart(archetype_dist, selected_squad)
+                if pie_fig:
+                    st.plotly_chart(pie_fig, use_container_width=True)
+            else:
+                st.info("Archetype data not available for this squad")
+        
+        with col2:
+            st.write("**Archetype Breakdown:**")
+            if archetype_dist:
+                for archetype, count in sorted(archetype_dist.items(), key=lambda x: -x[1]):
+                    pct = (count / len(squad_roster)) * 100
+                    st.write(f"- **{archetype}**: {count} ({pct:.0f}%)")
+            
+            # Tactical balance analysis
+            st.write("---")
+            st.write("**Tactical Balance:**")
+            
+            # Count by position group
+            pos_counts = squad_roster['Primary_Pos'].value_counts()
+            for pos in ['FW', 'MF', 'DF', 'GK']:
+                count = pos_counts.get(pos, 0)
+                st.write(f"- {pos}: {count} players")
+        
+        st.divider()
+        
+        # ========================================================================
+        # ROSTER AGE CURVE
+        # ========================================================================
+        
+        st.subheader("Roster Age Curve")
+        st.write("Compare squad age distribution to league average")
+        
+        age_fig = create_age_histogram(squad_roster, league_roster, selected_squad)
+        st.plotly_chart(age_fig, use_container_width=True)
+        
+        # Age analysis
+        col1, col2, col3 = st.columns(3)
+        
+        squad_mean_age = squad_roster['Age'].mean()
+        league_mean_age = league_roster['Age'].mean()
+        age_diff = squad_mean_age - league_mean_age
+        
+        with col1:
+            st.metric(
+                "Squad Avg Age",
+                f"{squad_mean_age:.1f}",
+                delta=f"{age_diff:+.1f} vs league"
+            )
+        with col2:
+            young_players = len(squad_roster[squad_roster['Age'] <= 23])
+            st.metric("U-23 Players", young_players)
+        with col3:
+            peak_players = len(squad_roster[(squad_roster['Age'] >= 24) & (squad_roster['Age'] <= 29)])
+            st.metric("Peak Age (24-29)", peak_players)
+        
+        # Rebuild indicator
+        if age_diff > 2:
+            st.warning("This squad is OLDER than league average. Consider youth investment.")
+        elif age_diff < -2:
+            st.success("This squad is YOUNGER than league average. Strong development pipeline.")
+        
+        st.divider()
+        
+        # ========================================================================
+        # SQUAD RADAR
+        # ========================================================================
+        
+        st.subheader("Squad Profile (Top 11)")
+        st.write("Mean percentile scores of starting XI vs league average")
+        
+        squad_pcts = calculate_squad_mean_percentiles(squad_roster)
+        league_pcts = calculate_league_mean_percentiles(squad_df, selected_league)
+        
+        if squad_pcts and league_pcts:
+            radar_fig = create_squad_radar(squad_pcts, league_pcts, selected_squad)
+            st.plotly_chart(radar_fig, use_container_width=True)
+        else:
+            st.info("Insufficient percentile data for radar chart")
+        
+        st.divider()
+        
+        # ========================================================================
+        # LEAGUE DOMINANCE
+        # ========================================================================
+        
+        st.subheader("League Dominance Scores")
+        st.write("How much the squad out-performs their league peers (Z-scores)")
+        
+        dominance_summary = calculate_squad_dominance_summary(squad_roster)
+        
+        if dominance_summary:
+            dom_fig = create_dominance_bar_chart(dominance_summary, selected_squad)
+            if dom_fig:
+                st.plotly_chart(dom_fig, use_container_width=True)
+            
+            # Interpretation
+            top_dominance = max(dominance_summary.items(), key=lambda x: x[1])
+            weak_dominance = min(dominance_summary.items(), key=lambda x: x[1])
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.success(f"**Strongest Area:** {top_dominance[0]} ({top_dominance[1]:+.2f} Z)")
+            with col2:
+                st.error(f"**Weakest Area:** {weak_dominance[0]} ({weak_dominance[1]:+.2f} Z)")
+        else:
+            st.info("Dominance scores not available. Run ETL to calculate.")
+        
+        st.divider()
+        
+        # ========================================================================
+        # FULL ROSTER TABLE
+        # ========================================================================
+        
+        with st.expander("View Full Roster", expanded=False):
+            display_cols = ['Player', 'Primary_Pos', 'Age', '90s', 'Gls/90', 'Ast/90']
+            if 'Archetype' in squad_roster.columns:
+                display_cols.append('Archetype')
+            
+            # Add dominance if available
+            dominance_cols = [col for col in squad_roster.columns if '_Dominance' in col]
+            if dominance_cols:
+                display_cols.extend(dominance_cols[:3])  # Top 3 dominance cols
+            
+            st.dataframe(
+                squad_roster[display_cols].sort_values('90s', ascending=False),
+                use_container_width=True,
+                hide_index=True
+            )
+
+    else:
+        st.warning("No squads found matching your search criteria.")
+
+# ============================================================================
+# PAGE 6: SQUAD PLANNER
+# ============================================================================
+
+elif st.session_state.page == 'Squad Planner':
+    st.header("Shadow Board Planner")
+    st.caption("Plan your squad and identify recruitment targets.")
+    
+    # Initialize Shadow Squad if not exists
+    if 'shadow_squad' not in st.session_state:
+        st.session_state.shadow_squad = {
+            'GK': None,
+            'RB': None, 'RCB': None, 'LCB': None, 'LB': None,
+            'CDM': None, 'RCM': None, 'LCM': None,
+            'RW': None, 'ST': None, 'LW': None
+        }
+
+    # Layout: Left = Settings/Add Player, Right = Pitch
+    col_control, col_pitch = st.columns([1, 2])
+
+    with col_control:
+        st.subheader("Manage Roster")
+        
+        # Position Selector to Add/Remove
+        selected_pos = st.selectbox("Select Position Slot:", list(PITCH_COORDS.keys()))
+        
+        current_player = st.session_state.shadow_squad[selected_pos]
+        
+        if current_player:
+            st.info(f"Current: **{current_player['Player']}**")
+            if st.button("Remove Player", key='remove_btn'):
+                st.session_state.shadow_squad[selected_pos] = None
+                st.rerun()
+        else:
+            st.write("Slot Empty")
+            
+        st.divider()
+        
+        st.subheader("Add Player")
+        # Player Search
+        search_term = st.text_input("Search Player:", key='planner_search')
+        
+        if search_term:
+            # Use global df
+            results = df[df['Player'].str.lower().str.contains(search_term.lower())].head(10)
+            
+            if not results.empty:
+                player_name_list = results['Player'].tolist()
+                # Try to add squad context to keys to make them unique
+                player_options = {f"{row['Player']} ({row['Squad']})": row for _, row in results.iterrows()}
+                
+                selected_option = st.selectbox("Select Result:", list(player_options.keys()))
+                
+                if st.button("Add to Squad"):
+                    # Architectural Requirement: Store Full Player JSON
+                    # Converting Series to Dict for serialization
+                    player_obj = player_options[selected_option].to_dict()
+                    st.session_state.shadow_squad[selected_pos] = player_obj
+                    st.success(f"Added {player_obj['Player']} to {selected_pos}")
+                    st.rerun()
+        
+        st.divider()
+        
+        # Recommendation Engine (Mini)
+        if not current_player:
+            st.subheader("Recommendations")
+            st.caption(f"Find players for {selected_pos}")
+            
+            target_pos_map = {
+                'GK': 'GK', 'RB': 'DF', 'LB': 'DF', 'RCB': 'DF', 'LCB': 'DF',
+                'CDM': 'MF', 'RCM': 'MF', 'LCM': 'MF',
+                'RW': 'FW', 'LW': 'FW', 'ST': 'FW'
+            }
+            
+            if st.button("Find Candidates"):
+                # Simple logic: Top rated players in league for that position
+                # Ideally use SimilarityEngine if we had a "Template Player"
+                pos_code = target_pos_map.get(selected_pos, 'MF')
+                
+                # Check metrics existence
+                sort_metric = 'Gls/90_Dominance' if pos_code=='FW' and 'Gls/90_Dominance' in df.columns else 'Ast/90'
+                if pos_code != 'FW' and 'Int/90_Dominance' in df.columns:
+                     sort_metric = 'Int/90_Dominance'
+                
+                candidates = df[
+                    (df['Primary_Pos'] == pos_code) & 
+                    (df['Age'] <= 28)
+                ].sort_values(sort_metric, ascending=False).head(5)
+                
+                st.write("Top Available:")
+                for _, p in candidates.iterrows():
+                    if st.button(f"Add {p['Player']} ({p['Squad']})", key=f"rec_{p['Player']}"):
+                         st.session_state.shadow_squad[selected_pos] = p.to_dict()
+                         st.rerun()
+
+    with col_pitch:
+        st.subheader("Formation: 4-3-3")
+        pitch_fig = create_pitch_visualization(st.session_state.shadow_squad)
+        st.plotly_chart(pitch_fig, use_container_width=True)
+        
+        # Squad Metrics
+        st.subheader("Shadow Squad DNA")
+        
+        # Calculate aggregate stats
+        active_players = [p for p in st.session_state.shadow_squad.values() if p]
+        
+        if active_players:
+            col1, col2, col3 = st.columns(3)
+            ages = [p['Age'] for p in active_players]
+            avg_age = sum(ages) / len(ages)
+            
+            with col1:
+                 st.metric("Avg Age", f"{avg_age:.1f}")
+            with col2:
+                 st.metric("Roster Size", len(active_players))
+            with col3:
+                 # Example Dominance aggregations
+                 doms = [p.get('Gls/90_Dominance', 0) for p in active_players if 'Gls/90_Dominance' in p]
+                 avg_dom = sum(doms)/len(doms) if doms else 0
+                 st.metric("Avg Attack Dominance", f"{avg_dom:+.2f}")
+        else:
+            st.info("Add players to see squad metrics.")
+            
+        # Clear Squad Button (from original sidebar)
+        if st.button("Clear Squad", key='clear_shadow_squad'):
+            for k in st.session_state.shadow_squad:
+                 st.session_state.shadow_squad[k] = None
+            st.rerun()
 
 # ============================================================================
 # FOOTER

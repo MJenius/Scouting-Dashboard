@@ -93,12 +93,15 @@ def extract_stats(row, columns):
             continue
         stats[col] = convert_numpy_types(value)
     
-    # Include derived metrics (efficiency, z-scores, PCA)
+    # Include derived metrics (efficiency, z-scores, PCA, dominance)
     derived_cols = [
         'Finishing_Efficiency', 'Creative_Efficiency', 
         'Age_Z_Score_GA90', 'G_plus_A',
         'PCA_X', 'PCA_Y', 'Completeness_Score', 'Completeness_Core',
-        '90s', 'Min'
+        '90s', 'Min',
+        # League Dominance Z-Scores (contextual scaling)
+        'Gls/90_Dominance', 'Ast/90_Dominance', 'xG90_Dominance', 'xA90_Dominance',
+        'TklW/90_Dominance', 'Int/90_Dominance'
     ]
     for col in derived_cols:
         if col in row.index:

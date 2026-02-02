@@ -559,6 +559,68 @@ def calculate_age_z_scores(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ============================================================================
+# LEAGUE DOMINANCE SCORING
+# ============================================================================
+
+MIN_LEAGUE_POPULATION = 10  # Minimum players per league for valid Z-score
+
+def calculate_league_dominance(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate League-Relative Z-Scores for core KPIs.
+    
+    A player's "Dominance" score shows how many standard deviations
+    they are above/below their league's average for each stat.
+    Helps identify players who have "outgrown" their current league.
+    
+    Architectural Note:
+    - Minimum population check (10 players) prevents misleading Z-scores
+      from small sample sizes (e.g., winter window partial data).
+    
+    Output columns:
+    - {Stat}_Dominance: Z-score relative to league peers
+    
+    Args:
+        df (pd.DataFrame): Processed dataset with features
+        
+    Returns:
+        pd.DataFrame: Dataset with Dominance columns added
+    """
+    df = df.copy()
+    
+    # Core KPIs for dominance scoring (attacking metrics most relevant for scouting)
+    dominance_metrics = ['Gls/90', 'Ast/90', 'xG90', 'xA90']
+    
+    # Also include key defensive metrics for defenders
+    defensive_metrics = ['TklW/90', 'Int/90']
+    all_metrics = dominance_metrics + defensive_metrics
+    
+    def league_z_score(x):
+        """
+        Calculate Z-score within a league group.
+        Returns 0 if population is too small or std is 0.
+        """
+        if len(x) < MIN_LEAGUE_POPULATION or x.std() == 0:
+            return 0.0
+        return (x - x.mean()) / x.std()
+    
+    for metric in all_metrics:
+        if metric not in df.columns:
+            continue
+        
+        col_name = f'{metric}_Dominance'
+        
+        # Group by League and calculate Z-score within each group
+        df[col_name] = df.groupby('League')[metric].transform(league_z_score)
+        
+        # Fill any remaining NaNs with 0 (neutral dominance)
+        df[col_name] = df[col_name].fillna(0.0)
+    
+    print(f"Calculated League Dominance for {len([m for m in all_metrics if m in df.columns])} metrics")
+    
+    return df
+
+
+# ============================================================================
 # DATA COMPLETENESS SCORING
 # ============================================================================
 
@@ -745,6 +807,12 @@ def process_all_data(csv_path: str, min_90s: int = MIN_MINUTES_PLAYED) -> Dict[s
     print("\n[5a/7] Calculating Age Z-Scores...")
     df_filtered = calculate_age_z_scores(df_filtered)
     print("Calculated Age Z-Scores for G+A/90")
+    
+    # Step 5b: Calculate League Dominance (Contextual Scaling)
+    print("\n[5b/7] Calculating League Dominance Z-Scores...")
+    df_filtered = calculate_league_dominance(df_filtered)
+    dominance_cols = [col for col in df_filtered.columns if '_Dominance' in col]
+    print(f"Added {len(dominance_cols)} Dominance columns")
     
     # Step 6: Completeness scoring
     print("\n[6/7] Calculating data completeness scores...")

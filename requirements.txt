@@ -28,8 +28,9 @@ pyyaml>=6.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 
-# LLM Integration (Google Gemini)
+# LLM Integration
 google-generativeai>=0.3.0
+openai>=1.0.0  # Local LLM compatibility (Ollama)
 
 # Optional: For better performance
 openpyxl>=3.1.0  # Excel export
