@@ -319,10 +319,10 @@ def format_age_curve_badge(anomaly: AgeCurveAnomaly) -> str:
         HTML/markdown badge string
     """
     if anomaly.z_score >= 3.0:
-        return "🌟 Elite Prospect (3σ Above Age Cohort)"
+        return "Elite Prospect (3 standard deviations Above Age Cohort)"
     elif anomaly.z_score >= 2.5:
-        return "⭐ High-Ceiling Prospect (2.5σ Above Age Cohort)"
+        return "High-Ceiling Prospect (2.5 standard deviations Above Age Cohort)"
     elif anomaly.z_score >= 2.0:
-        return "✨ Ahead of Curve (2σ Above Age Cohort)"
+        return "Ahead of Curve (2 standard deviations Above Age Cohort)"
     else:
-        return "📈 Above Average for Age"
+        return "Above Average for Age"

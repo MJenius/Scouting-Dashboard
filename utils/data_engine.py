@@ -103,7 +103,7 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
     # Look for any file containing "Advanced Stats"
     advanced_files = glob.glob(os.path.join(data_dir, "*Advanced Stats.csv"))
     
-    print(f"ℹ️  Found {len(advanced_files)} advanced stats files.")
+    print(f"Found {len(advanced_files)} advanced stats files.")
 
     for adv_path in advanced_files:
         try:
@@ -121,7 +121,7 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
                     break
             
             if not current_league:
-                print(f"⚠️  Skipping {filename}: Could not infer league from filename.")
+                print(f"Skipping {filename}: Could not infer league from filename.")
                 continue
 
             # Load with semicolon delimiter
@@ -149,7 +149,7 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
             adv_df = adv_df.rename(columns=rename_dict)
             
             if 'Player' not in adv_df.columns:
-                print(f"⚠️  Could not find 'Player' column in {adv_path}. Skipping.")
+                print(f"Could not find 'Player' column in {adv_path}. Skipping.")
                 continue
 
             # Prepare for merge with lowercase keys
@@ -160,7 +160,7 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
             # Identify players from this league in the main dataframe
             league_mask = df['League'] == current_league
             if not league_mask.any():
-                print(f"ℹ️  No players found for {current_league} in master file (checking '{current_league}').")
+                print(f"No players found for {current_league} in master file (checking '{current_league}').")
                 continue
 
             league_players = df[league_mask].copy()
@@ -232,16 +232,16 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
             # Drop old rows for this league and append new merged rows
             df = df[df['League'] != current_league]
             df = pd.concat([df, merged], axis=0, ignore_index=True)
-            print(f"📊 Merged advanced stats for {current_league} ({len(merged)} players)")
+            print(f"Merged advanced stats for {current_league} ({len(merged)} players)")
             
         except Exception as e:
-            print(f"⚠️  Warning: Could not merge advanced stats for {adv_path}: {e}")
+            print(f"Warning: Could not merge advanced stats for {adv_path}: {e}")
 
     # Final validation of required columns
     required_columns = ['Player', 'Squad', 'League', 'Pos', 'Age', '90s'] + FEATURE_COLUMNS
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
-        print(f"⚠️  Missing columns in merged dataset: {missing_columns}")
+        print(f"Missing columns in merged dataset: {missing_columns}")
     
     return df
 
@@ -282,7 +282,7 @@ def clean_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
     # -------------------------------------------------------------------------
     # NATIONAL LEAGUE IMPUTATION (Median from League Two)
     # -------------------------------------------------------------------------
-    print("ℹ️  Performing National League defensive imputation...")
+    print("Performing National League defensive imputation...")
     defensive_metrics = ['Crs/90', 'Int/90', 'TklW/90', 'Fls/90', 'Fld/90']
     
     # Calculate medians from League Two by position
@@ -309,7 +309,7 @@ def clean_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
     # 2. Fill remaining with Global Position Mean
     # 3. Fill remaining with 0 (safe fallback)
     
-    print("ℹ️  Imputing missing data with league/position averages...")
+    print("Imputing missing data with league/position averages...")
     
     # We do this for FEATURE_COLUMNS (Outfield) and GK_FEATURE_COLUMNS
     all_metrics = list(set(FEATURE_COLUMNS + GK_FEATURE_COLUMNS))
@@ -358,7 +358,7 @@ def filter_by_minutes_played(df: pd.DataFrame, min_90s: int = MIN_MINUTES_PLAYED
     
     removed_count = initial_count - filtered_count
     if removed_count > 0:
-        print(f"ℹ️  Filtered {removed_count} players with <{min_90s} 90s matches. "
+        print(f"Filtered {removed_count} players with <{min_90s} 90s matches. "
               f"Retained {filtered_count} players.")
     
     return df_filtered
@@ -399,7 +399,7 @@ def validate_data(df: pd.DataFrame) -> Dict[str, any]:
             }
             stats['null_defensive_stats'] = null_counts
             validation_report['warnings'].append(
-                f"⚠️  {league}: Defensive stats may be unavailable in this data tier (as expected)"
+                f"{league}: Defensive stats may be unavailable in this data tier (as expected)"
             )
         
         validation_report['league_stats'][league] = stats
@@ -412,7 +412,7 @@ def validate_data(df: pd.DataFrame) -> Dict[str, any]:
             group_size = len(df[(df['League'] == league) & (df['Primary_Pos'] == pos)])
             if group_size < MIN_PLAYERS_PER_GROUP:
                 validation_report['warnings'].append(
-                    f"⚠️  Low sample: {league} {pos} has only {group_size} players"
+                    f"Low sample: {league} {pos} has only {group_size} players"
                 )
     
     return validation_report
@@ -679,7 +679,7 @@ def get_feature_statistics(df: pd.DataFrame) -> pd.DataFrame:
 
 def process_all_data(csv_path: str, min_90s: int = MIN_MINUTES_PLAYED) -> Dict[str, any]:
     """
-    Full data processing pipeline: Load → Validate → Filter → Percentiles → Completeness → Scale
+    Full data processing pipeline: Load -> Validate -> Filter -> Percentiles -> Completeness -> Scale
     
     This is the main entry point for the Streamlit app (wrapped in @st.cache_data).
     
@@ -710,18 +710,18 @@ def process_all_data(csv_path: str, min_90s: int = MIN_MINUTES_PLAYED) -> Dict[s
         ValueError: If critical columns missing
     """
     print("=" * 80)
-    print("🔄 STARTING DATA PROCESSING PIPELINE")
+    print("STARTING DATA PROCESSING PIPELINE")
     print("=" * 80)
     
     # Step 1: Load and initial cleaning
     print("\n[1/7] Loading CSV...")
     df = load_data(csv_path)
-    print(f"✓ Loaded {len(df)} total records")
+    print(f"Loaded {len(df)} total records")
     
     # Step 2: Clean features
     print("\n[2/7] Cleaning feature columns...")
     df = clean_feature_columns(df)
-    print(f"✓ Coerced all features to float")
+    print(f"Coerced all features to float")
     
     # Step 3: Filter by minutes
     print(f"\n[3/7] Filtering by minimum {min_90s} 90s...")
@@ -730,7 +730,7 @@ def process_all_data(csv_path: str, min_90s: int = MIN_MINUTES_PLAYED) -> Dict[s
     # Step 4: Validation
     print("\n[4/7] Validating data quality...")
     validation_report = validate_data(df_filtered)
-    print(f"✓ Validation complete")
+    print(f"Validation complete")
     if validation_report['warnings']:
         for warning in validation_report['warnings']:
             print(f"  {warning}")
@@ -739,23 +739,23 @@ def process_all_data(csv_path: str, min_90s: int = MIN_MINUTES_PLAYED) -> Dict[s
     print("\n[5/7] Calculating position-specific percentiles...")
     df_filtered = calculate_position_percentiles(df_filtered)
     pct_cols = [col for col in df_filtered.columns if '_pct' in col]
-    print(f"✓ Added {len(pct_cols)} percentile columns")
+    print(f"Added {len(pct_cols)} percentile columns")
 
     # Step 5a: Calculate Age Z-Scores (G+A/90)
     print("\n[5a/7] Calculating Age Z-Scores...")
     df_filtered = calculate_age_z_scores(df_filtered)
-    print("✓ Calculated Age Z-Scores for G+A/90")
+    print("Calculated Age Z-Scores for G+A/90")
     
     # Step 6: Completeness scoring
     print("\n[6/7] Calculating data completeness scores...")
     df_filtered = calculate_data_completeness(df_filtered)
     avg_completeness = df_filtered['Completeness_Score'].mean()
-    print(f"✓ Average completeness: {avg_completeness:.1f}%")
+    print(f"Average completeness: {avg_completeness:.1f}%")
     
     # Step 7: Feature scaling
     print("\n[7/7] Scaling features and calculating PCA...")
     scaled_features, scalers = scale_features(df_filtered)
-    print(f"✓ Scaled features for {scaled_features.shape[0]} players")
+    print(f"Scaled features for {scaled_features.shape[0]} players")
     
     # Step 8: PCA Calculation (Phase 3 Prep)
     # We calculate PCA coordinates on the Scaled Features
@@ -771,9 +771,9 @@ def process_all_data(csv_path: str, min_90s: int = MIN_MINUTES_PLAYED) -> Dict[s
         
         df_filtered['PCA_X'] = pca_coords[:, 0]
         df_filtered['PCA_Y'] = pca_coords[:, 1]
-        print(f"✓ Calculated PCA Coordinates (Explained Variance: {pca.explained_variance_ratio_})")
+        print(f"Calculated PCA Coordinates (Explained Variance: {pca.explained_variance_ratio_})")
     except Exception as e:
-        print(f"⚠️ PCA calculation failed: {e}")
+        print(f"PCA calculation failed: {e}")
         df_filtered['PCA_X'] = 0.0
         df_filtered['PCA_Y'] = 0.0
     
@@ -782,7 +782,7 @@ def process_all_data(csv_path: str, min_90s: int = MIN_MINUTES_PLAYED) -> Dict[s
     
     # Summary
     print("\n" + "=" * 80)
-    print("✓ PIPELINE COMPLETE")
+    print("PIPELINE COMPLETE")
     print("=" * 80)
     print(f"Final dataset: {len(df_filtered)} players across {df_filtered['League'].nunique()} leagues")
     print(f"Data dropped: {len(df) - len(df_filtered)} players (statistical reliability filtering)")

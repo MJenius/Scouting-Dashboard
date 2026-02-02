@@ -3,10 +3,10 @@ app.py - Main Streamlit application entry point for Football Scouting Dashboard.
 
 Multi-page app with global filters (Age, League, Position, Minutes) persisted via st.session_state.
 Pages:
-  - 🔍 Player Search: Fuzzy search + similar players
-  - ⚔️  Head-to-Head: Player comparison + radar charts
-  - 💎 Hidden Gems: Metric filters + transfer recommendations
-  - 🏆 Leaderboards: Rankings by metric + archetype filters
+  - Player Search: Fuzzy search + similar players
+  - Head-to-Head: Player comparison + radar charts
+  - Hidden Gems: Metric filters + transfer recommendations
+  - Leaderboards: Rankings by metric + archetype filters
 """
 
 import streamlit as st
@@ -59,8 +59,8 @@ except ImportError:
 # ============================================================================
 
 st.set_page_config(
-    page_title="⚽ Football Scouting Dashboard",
-    page_icon="⚽",
+    page_title="Football Scouting Dashboard",
+    page_icon="Analysis",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -100,7 +100,7 @@ if 'filters' not in st.session_state:
     }
 
 if 'page' not in st.session_state:
-    st.session_state.page = '🔍 Player Search'
+    st.session_state.page = 'Player Search'
 
 # Track backend availability
 if 'backend_available' not in st.session_state:
@@ -136,7 +136,7 @@ def get_clustered_players(df, scaled):
 def ensure_data_loaded():
     """Ensure data is loaded into session state."""
     if not st.session_state.data_loaded:
-        with st.spinner("🔄 Loading and processing data..."):
+        with st.spinner("Loading and processing data..."):
             result, engine, df, scaled = load_all_data()
             df_clustered, clusterer = get_clustered_players(df, scaled)
             st.session_state.data_result = result
@@ -151,7 +151,7 @@ def ensure_data_loaded():
 
 with st.sidebar:
 
-    st.title("⚙️ Filters & Settings")
+    st.title("Filters & Settings")
     
     # Age filter
     st.subheader("Age Range")
@@ -200,7 +200,7 @@ with st.sidebar:
     st.divider()
     
     # Info panel
-    st.subheader("📊 Dataset Info")
+    st.subheader("Dataset Info")
     if st.session_state.data_loaded:
         df = st.session_state.df_clustered
         # Apply filters
@@ -223,32 +223,32 @@ with st.sidebar:
     st.divider()
     
     # Backend connection status indicator
-    st.subheader("🔌 API Status")
+    st.subheader("API Status")
     if API_CLIENT_AVAILABLE and st.session_state.backend_available:
-        st.success("✅ FastAPI Backend Connected")
+        st.success("FastAPI Backend Connected")
         try:
             health_ok, health_data = check_backend_health()
             if health_ok:
-                st.caption(f"👥 {health_data.get('player_count', '?')} players in DB")
+                st.caption(f"Database contains {health_data.get('player_count', '?')} players")
                 if health_data.get('engine_loaded'):
-                    st.caption("🚀 Similarity Engine: Active")
+                    st.caption("Similarity Engine: Active")
         except:
             pass
     elif API_CLIENT_AVAILABLE:
-        st.warning("⚠️ Backend Unavailable")
+        st.warning("Backend Unavailable")
         st.caption("Using local fallback mode")
-        if st.button("🔄 Retry Connection", key='retry_backend'):
+        if st.button("Retry Connection", key='retry_backend'):
             try:
                 st.session_state.backend_available = is_backend_available()
                 st.rerun()
             except:
                 pass
     else:
-        st.info("📦 Running in Local Mode")
+        st.info("Running in Local Mode")
         st.caption("API client not installed")
     
     st.divider()
-    if st.button("🔄 Reset Cache & Reload Data", use_container_width=True):
+    if st.button("Reset Cache & Reload Data", use_container_width=True):
         st.cache_data.clear()
         st.session_state.data_loaded = False
         st.rerun()
@@ -279,16 +279,16 @@ engine = st.session_state.engine
 df_filtered = apply_filters(df)
 
 # Header
-st.title("⚽ Football Scouting Dashboard")
+st.title("Football Scouting Dashboard")
 st.caption(f"Multi-League Global Scouting Dashboard | {len(df_filtered):,} players after filters")
 
 # Page selection
 col1, col2, col3, col4 = st.columns(4)
 pages = {
-    '🔍 Player Search': col1,
-    '⚔️ Head-to-Head': col2,
-    '💎 Hidden Gems': col3,
-    '🏆 Leaderboards': col4,
+    'Player Search': col1,
+    'Head-to-Head': col2,
+    'Hidden Gems': col3,
+    'Leaderboards': col4,
 }
 
 for page_name, col in pages.items():
@@ -301,8 +301,8 @@ st.divider()
 # PAGE 1: PLAYER SEARCH
 # ============================================================================
 
-if st.session_state.page == '🔍 Player Search':
-    st.header("🔍 Player Search")
+if st.session_state.page == 'Player Search':
+    st.header("Player Search")
     
     col1, col2 = st.columns([3, 1])
     
@@ -358,7 +358,7 @@ if st.session_state.page == '🔍 Player Search':
                 if idx is not None and idx in df.index:
                     player_data = df.loc[idx]
                 else:
-                    st.error(f"⚠️ **Data Alignment Issue**: Could not find data for '{selected_player}' in the current tactical map.")
+                    st.error(f"**Data Alignment Issue**: Could not find data for '{selected_player}' in the current tactical map.")
                     st.info("This can happen if the cache is out of sync. Please click **'Reset Cache & Reload Data'** in the sidebar.")
                     st.stop()
                 
@@ -385,15 +385,15 @@ if st.session_state.page == '🔍 Player Search':
                 
                 # Special handling for limited data leagues (capped at 33% by design)
                 if player_league in LOW_DATA_LEAGUES:
-                    st.write(f"**📋 Data Availability**: 🔵 Limited Data Tier ({player_league})")
+                    st.write(f"**Data Availability**: Limited Data Tier ({player_league})")
                     st.caption(
                         f"_{player_league} players have limited statistical coverage in our dataset. "
-                        "This does not reflect player quality—further manual scouting recommended._"
+                        "This does not reflect player quality--further manual scouting recommended._"
                     )
                     col1, col2 = st.columns([2, 1])
                     with col1:
                         st.info(
-                            f"⚠️ **Scouting Note**: {player_league} data is capped at 33% completeness by design. "
+                            f"**Scouting Note**: {player_league} data is capped at 33% completeness by design. "
                             "Use this profile for directional insights only."
                         )
                     with col2:
@@ -402,16 +402,16 @@ if st.session_state.page == '🔍 Player Search':
                     # Standard confidence labels for other leagues
                     # Determine confidence label and color
                     if completeness >= 90:
-                        confidence_label = "🟢 Verified Elite Data"
+                        confidence_label = "Verified Elite Data"
                         confidence_desc = "Full scouting confidence - all key metrics available"
                     elif completeness >= 70:
-                        confidence_label = "🟡 Good Scouting Data"
+                        confidence_label = "Good Scouting Data"
                         confidence_desc = "Sufficient data for reliable assessment"
                     elif completeness >= 40:
-                        confidence_label = "🟠 Directional Data"
+                        confidence_label = "Directional Data"
                         confidence_desc = "Further vetting required - use with caution"
                     else:
-                        confidence_label = "🔴 Incomplete Data"
+                        confidence_label = "Incomplete Data"
                         confidence_desc = "Caution advised - limited metrics available"
 
                     col1, col2 = st.columns([2, 1])
@@ -427,7 +427,7 @@ if st.session_state.page == '🔍 Player Search':
                 st.divider()
                 
                 # Scout's Take - ENHANCED WITH LLM
-                st.subheader("📝 Scout's Take")
+                st.subheader("Scout's Take")
                 
                 # Toggle for LLM vs rule-based
                 col1, col2 = st.columns([3, 1])
@@ -435,7 +435,7 @@ if st.session_state.page == '🔍 Player Search':
                     st.write("Automated scouting report")
                 with col2:
                     use_llm = st.checkbox(
-                        "🤖 Use AI",
+                        "Use AI",
                         value=False,
                         help="Use Google Gemini for context-aware narratives (requires API key)",
                         key='use_llm_narrative'
@@ -453,25 +453,25 @@ if st.session_state.page == '🔍 Player Search':
                                     use_llm=True
                                 )
                             
-                            st.success("🤖 AI-Generated Report (Google Gemini)")
+                            st.success("AI-Generated Report (Google Gemini)")
                             st.markdown(narrative)
                         else:
                             # Use rule-based generation
                             narrative = generate_narrative_for_player(player_data)
-                            st.info("📋 Rule-Based Report")
+                            st.info("Rule-Based Report")
                             st.markdown(narrative)
                     except RuntimeError as e:
                         # AI not available or failed
-                        st.error(f"❌ AI Generation Failed: {e}")
-                        st.warning("💡 **AI is not integrated.** Please check your GEMINI_API_KEY in the .env file.")
-                        st.info("Uncheck '🤖 Use AI' to see the rule-based report instead.")
+                        st.error(f"AI Generation Failed: {e}")
+                        st.warning("**AI is not integrated.** Please check your GEMINI_API_KEY in the .env file.")
+                        st.info("Uncheck 'Use AI' to see the rule-based report instead.")
                     except Exception as e:
-                        st.error(f"❌ Error generating narrative: {e}")
+                        st.error(f"Error generating narrative: {e}")
 
                 
                 # PDF Export button - ENHANCED
                 st.divider()
-                st.subheader("📄 Export Scouting Dossier")
+                st.subheader("Export Scouting Dossier")
                 st.write("Generate a professional PDF report for recruitment meetings")
                 
                 try:
@@ -497,7 +497,7 @@ if st.session_state.page == '🔍 Player Search':
                     
                     # Direct download button
                     st.download_button(
-                        label="📥 Download PDF Scouting Dossier",
+                        label="Download PDF Scouting Dossier",
                         data=pdf_data,
                         file_name=f"{player_data.get('Player','player').replace(' ', '_')}_scouting_report.pdf",
                         mime="application/pdf",
@@ -511,7 +511,7 @@ if st.session_state.page == '🔍 Player Search':
                 st.divider()
                 
                 # Percentile bars - show position-specific stats
-                st.subheader("📊 Key Statistics")
+                st.subheader("Key Statistics")
                 
                 is_goalkeeper = player_data['Primary_Pos'] == 'GK'
                 
@@ -546,7 +546,7 @@ if st.session_state.page == '🔍 Player Search':
                 st.divider()
                 
                 # NEW: Age-Curve Anomaly Detection (High-Ceiling Prospects)
-                st.subheader("🌟 Age-Curve Analysis")
+                st.subheader("Age-Curve Analysis")
                 
                 try:
                     from utils.age_curve_analysis import AgeCurveAnalyzer, format_age_curve_badge
@@ -629,7 +629,7 @@ if st.session_state.page == '🔍 Player Search':
                             )
                         
                         # Show age cohort comparison
-                        with st.expander(f"📊 View Age Cohort Comparison ({key_metric})"):
+                        with st.expander(f"View Age Cohort Comparison ({key_metric})"):
                             age_curves = analyzer.calculate_age_curves(
                                 key_metric,
                                 position=player_data['Primary_Pos'],
@@ -661,7 +661,7 @@ if st.session_state.page == '🔍 Player Search':
                 st.divider()
                 
                 # Similar players
-                st.subheader("👥 Top 5 Similar Players")
+                st.subheader("Top 5 Similar Players")
 
                 
                 col1, col2 = st.columns([2, 1])
@@ -808,7 +808,7 @@ if st.session_state.page == '🔍 Player Search':
                                         # 0 distance = 100%, 2+ distance = 0%
                                         similarity_pct = int(max(0, (1 - (dist / 2.0))) * 100)
                                         bar_length = int(similarity_pct / 5)
-                                        bar = "█" * bar_length + "░" * (20 - bar_length)
+                                        bar = "|" * bar_length + "-" * (20 - bar_length)
                                         st.write(f"{feat}: {bar} {similarity_pct}%")
                             else:
                                 # Fallback if attribution fails
@@ -822,7 +822,7 @@ if st.session_state.page == '🔍 Player Search':
 
                     # NEW: Similarity Driver Analysis
                     st.divider()
-                    st.subheader("🔍 Explainable Similarity - What Makes Them Similar?")
+                    st.subheader("Explainable Similarity - What Makes Them Similar?")
                     
                     # Show top match
                     if len(similar) > 0:
@@ -863,12 +863,12 @@ if st.session_state.page == '🔍 Player Search':
                                     st.write("**Most Similar Aspects:**")
                                     for feat, dist in most_similar_features:
                                         similarity_pct = int(max(0, (1 - (dist / 2.0))) * 100)
-                                        st.write(f"• {feat}: {similarity_pct}% similar")
+                                        st.write(f"- {feat}: {similarity_pct}% similar")
                                     
                                     st.write("**Key Differences:**")
                                     for feat, dist in most_different_features:
                                         similarity_pct = int(max(0, (1 - (dist / 2.0))) * 100)
-                                        st.write(f"• {feat}: {similarity_pct}% similar (Lower match here)")
+                                        st.write(f"- {feat}: {similarity_pct}% similar (Lower match here)")
                                     
                                     # Summary
                                     if most_different_features:
@@ -884,14 +884,14 @@ if st.session_state.page == '🔍 Player Search':
                     
                     # PDF Download Button
                     st.divider()
-                    st.subheader("📥 Export Scouting Dossier")
+                    st.subheader("Export Scouting Dossier")
                     
                     col1, col2 = st.columns([2, 1])
                     with col1:
                         st.write("Download a comprehensive one-page scouting report with radar chart and AI analysis")
                     
                     with col2:
-                        if st.button("📥 Download PDF Dossier", key='download_pdf_player_search'):
+                        if st.button("Download PDF Dossier", key='download_pdf_player_search'):
                             try:
                                 from utils.pdf_export import generate_dossier
                                 from utils.llm_integration import generate_llm_narrative
@@ -917,7 +917,7 @@ if st.session_state.page == '🔍 Player Search':
                                     st.session_state['pdf_bytes'] = pdf_bytes
                                     st.session_state['pdf_filename'] = f"{player_data.get('Player','player').replace(' ', '_')}_scouting_report.pdf"
                                     
-                                    st.success("✅ Dossier generated successfully! Click below to download.")
+                                    st.success("Dossier generated successfully! Click below to download.")
                                     
                                 except Exception as e:
                                     st.error(f"Error generating PDF: {e}")
@@ -932,7 +932,7 @@ if st.session_state.page == '🔍 Player Search':
                         # Show download button if ready (Persistent)
                         if 'pdf_bytes' in st.session_state:
                             st.download_button(
-                                label="📥 Download PDF Dossier",
+                                label="Download PDF Dossier",
                                 data=st.session_state['pdf_bytes'],
                                 file_name=st.session_state['pdf_filename'],
                                 mime="application/pdf",
@@ -942,7 +942,7 @@ if st.session_state.page == '🔍 Player Search':
             st.info("No players found. Try a different search term.")
     else:
         # Show Trending Prospects when search is empty
-        st.subheader("🌟 Trending Prospects (U23, Elite Stats)")
+        st.subheader("Trending Prospects (U23, Elite Stats)")
         st.write("Young players with exceptional performance metrics (>80th percentile)")
         
         # Filter for trending prospects
@@ -967,8 +967,8 @@ if st.session_state.page == '🔍 Player Search':
 # PAGE 2: HEAD-TO-HEAD
 # ============================================================================
 
-elif st.session_state.page == '⚔️ Head-to-Head':
-    st.header("⚔️ Head-to-Head Comparison")
+elif st.session_state.page == 'Head-to-Head':
+    st.header("Head-to-Head Comparison")
     
     col1, col2 = st.columns(2)
     
@@ -1002,7 +1002,7 @@ elif st.session_state.page == '⚔️ Head-to-Head':
             p2 = comparison['player2']
             
             with col1:
-                st.metric(f"📍 {p1['name']}", f"{p1['league']} | {p1['position']}")
+                st.metric(f"{p1['name']}", f"{p1['league']} | {p1['position']}")
             with col2:
                 p1_age = p1['age']
                 p2_age = p2['age']
@@ -1010,7 +1010,7 @@ elif st.session_state.page == '⚔️ Head-to-Head':
                 p2_age_display = int(p2_age) if not pd.isna(p2_age) else "??"
                 st.metric("Age", f"{p1_age_display} vs {p2_age_display}")
             with col3:
-                st.metric(f"⚡ {p2['name']}", f"{p2['league']} | {p2['position']}")
+                st.metric(f"{p2['name']}", f"{p2['league']} | {p2['position']}")
             with col4:
                 st.metric("Match Score", f"{comparison['match_score']:.1f}%")
 
@@ -1027,7 +1027,7 @@ elif st.session_state.page == '⚔️ Head-to-Head':
                 
                 comp_narrative = generate_comparison_narrative(p1_row, p2_row)
                 
-                st.subheader("📝 Smart Analysis")
+                st.subheader("Smart Analysis")
                 st.info(comp_narrative)
             
             st.divider()
@@ -1036,7 +1036,7 @@ elif st.session_state.page == '⚔️ Head-to-Head':
             is_both_gk = p1['position'] == 'GK' and p2['position'] == 'GK'
             
             # Radar chart
-            st.subheader("📊 Radar Comparison")
+            st.subheader("Radar Comparison")
             
             use_pct_radar = st.checkbox("Use Position Percentiles (Relative Quality)", value=True, key='h2h_radar_pct')
             
@@ -1056,7 +1056,7 @@ elif st.session_state.page == '⚔️ Head-to-Head':
             st.plotly_chart(radar_fig, use_container_width=True)
             
             # Feature comparison table
-            st.subheader("🔄 Feature-by-Feature Comparison")
+            st.subheader("Feature-by-Feature Comparison")
             
             # Determine which features to show
             if is_both_gk:
@@ -1070,7 +1070,7 @@ elif st.session_state.page == '⚔️ Head-to-Head':
             for feat in features_to_show:
                 if feat in comparison['feature_comparison']:
                     data = comparison['feature_comparison'][feat]
-                    winner = "✅ P1" if data['player1_better'] else "✅ P2"
+                    winner = "P1" if data['player1_better'] else "P2"
                     comp_data.append({
                         'Feature': feat,
                         p1['name'][:15]: f"{data['player1']:.2f}",
@@ -1084,9 +1084,9 @@ elif st.session_state.page == '⚔️ Head-to-Head':
             
             # PDF Download Button
             st.divider()
-            st.subheader("📥 Export Comparison Dossier")
+            st.subheader("Export Comparison Dossier")
             
-            if st.button("📥 Download Comparison PDF", key='download_pdf_h2h'):
+            if st.button("Download Comparison PDF", key='download_pdf_h2h'):
                 try:
                     from utils.pdf_export import generate_dossier, save_radar_chart_image
                     from utils.llm_integration import generate_llm_narrative
@@ -1120,14 +1120,14 @@ elif st.session_state.page == '⚔️ Head-to-Head':
                                 pdf_data = f.read()
                             
                             st.download_button(
-                                label="💾 Save Comparison PDF",
+                                label="Save Comparison PDF",
                                 data=pdf_data,
                                 file_name=f"comparison_{player1.replace(' ', '_')}_vs_{player2.replace(' ', '_')}.pdf",
                                 mime="application/pdf",
                                 key='save_comparison_pdf'
                             )
                             
-                            st.success("✓ Comparison PDF generated successfully!")
+                            st.success("Comparison PDF generated successfully!")
                         finally:
                             # Cleanup
                             if os.path.exists(pdf_path):
@@ -1149,21 +1149,21 @@ elif st.session_state.page == '⚔️ Head-to-Head':
 # PAGE 3: HIDDEN GEMS
 # ============================================================================
 
-elif st.session_state.page == '💎 Hidden Gems':
-    st.header("💎 Hidden Gems Discovery")
+elif st.session_state.page == 'Hidden Gems':
+    st.header("Hidden Gems Discovery")
     st.write("Discover high-efficiency outliers and unique profiles.")
     
     # Mode Selection
     search_mode = st.radio(
         "Search Mode:",
-        ["🚀 Discovery (Filters)", "🎯 Benchmark (Player Match)"], 
+        ["Discovery (Filters)", "Benchmark (Player Match)"], 
         horizontal=True,
         help="Choose between filtering by metrics or finding players similar to a benchmark player."
     )
     
     st.divider()
 
-    if search_mode == "🚀 Discovery (Filters)":
+    if search_mode == "Discovery (Filters)":
         # -------------------------------------------------------------------------
         # EXISTING DISCOVERY LOGIC
         # -------------------------------------------------------------------------
@@ -1171,7 +1171,7 @@ elif st.session_state.page == '💎 Hidden Gems':
         with col1:
             exclude_pl = st.checkbox("Exclude Premier League", value=True, help="Focus on lower leagues/abroad.")
         with col2:
-            use_step_up = st.toggle("🚀 Step-Up Projection", help="Apply penalty to non-PL stats to estimate PL quality.")
+            use_step_up = st.toggle("Step-Up Projection", help="Apply penalty to non-PL stats to estimate PL quality.")
         with col3:
             pass # spacer
 
@@ -1188,14 +1188,14 @@ elif st.session_state.page == '💎 Hidden Gems':
             for col in cols_to_swap:
                 if f'Projected_{col}' in gems.columns:
                     gems[col] = gems[f'Projected_{col}']
-            st.info("📉 Stats have been discounted to reflect projected Premier League output.")
+            st.info("Stats have been discounted to reflect projected Premier League output.")
 
         # -------------------------------------------------------------------------
         # 2. FILTERS
         # -------------------------------------------------------------------------
-        st.subheader("🔍 Discovery Filters")
+        st.subheader("Discovery Filters")
         
-        tab_efficiency, tab_style, tab_basics = st.tabs(["🚀 Efficiency", "🦄 The Unicorn Finder", "📊 Basics"])
+        tab_efficiency, tab_style, tab_basics = st.tabs(["Efficiency", "The Unicorn Finder", "Basics"])
         
         with tab_efficiency:
             st.caption("Find players who overperform their expected metrics (Clinical Finishing & Creativity).")
@@ -1209,7 +1209,7 @@ elif st.session_state.page == '💎 Hidden Gems':
 
         with tab_style:
             st.caption("Find players with unique, hybrid profiles that defy standard categorization.")
-            unicorn_score = st.slider("🦄 Stylistic Uniqueness (Unicorn Score):", 0, 100, 0,
+            unicorn_score = st.slider("Stylistic Uniqueness (Unicorn Score):", 0, 100, 0,
                                       help="0 = Generic Archetype, 100 = Unique Stylistic Outlier.")
             
         with tab_basics:
@@ -1249,7 +1249,7 @@ elif st.session_state.page == '💎 Hidden Gems':
         # 3. RESULTS
         # -------------------------------------------------------------------------
         st.divider()
-        st.subheader(f"🎯 Results ({len(filtered_gems)} players)")
+        st.subheader(f"Results ({len(filtered_gems)} players)")
         
         if not filtered_gems.empty:
             # Sort
@@ -1270,15 +1270,15 @@ elif st.session_state.page == '💎 Hidden Gems':
             
             # Export
             csv = filtered_gems.to_csv(index=False)
-            st.download_button("📥 Download Data", csv, "hidden_gems.csv", "text/csv")
+            st.download_button("Download Data", csv, "hidden_gems.csv", "text/csv")
         else:
             st.warning("No players found. Try relaxing the filters.")
     
-    elif search_mode == "🎯 Benchmark (Player Match)":
+    elif search_mode == "Benchmark (Player Match)":
         # -------------------------------------------------------------------------
         # BENCHMARK SEARCH LOGIC
         # -------------------------------------------------------------------------
-        st.subheader("🎯 Find the 'Next'...")
+        st.subheader("Find the 'Next'...")
         st.caption("Search for players across lower leagues who statically resemble a top-tier star.")
         
         col1, col2, col3 = st.columns(3)
@@ -1388,7 +1388,7 @@ elif st.session_state.page == '💎 Hidden Gems':
                                 max_value=100,
                             ),
                             "Proxy_Warnings": st.column_config.TextColumn(
-                                "⚠️ Data Confidence",
+                                "Data Confidence",
                                 help="When stats are missing in lower leagues, we use these proxies.",
                             )
                         }
@@ -1407,8 +1407,8 @@ elif st.session_state.page == '💎 Hidden Gems':
 # PAGE 4: LEADERBOARDS
 # ============================================================================
 
-elif st.session_state.page == '🏆 Leaderboards':
-    st.header("🏆 League Leaderboards")
+elif st.session_state.page == 'Leaderboards':
+    st.header("League Leaderboards")
     
     col1, col2, col3 = st.columns(3)
     
@@ -1476,7 +1476,7 @@ elif st.session_state.page == '🏆 Leaderboards':
     st.divider()
     
     # Leaderboard
-    st.subheader(f"🏅 Top Players - {metric}")
+    st.subheader(f"Top Players - {metric}")
     
     display_cols = ['Player', 'Squad', 'League', 'Primary_Pos', 'Age', metric, f'{metric}_pct', 'Archetype']
     st.dataframe(
@@ -1488,10 +1488,10 @@ elif st.session_state.page == '🏆 Leaderboards':
     
     # Distribution visualization - IMPROVED
     st.divider()
-    st.subheader(f"📊 Distribution Analysis - {metric}")
+    st.subheader(f"Distribution Analysis - {metric}")
     
     # Create tabs for different views
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Histogram", "📦 League Comparison", "🎯 Top Performers", "🌌 Tactical Style Map"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Histogram", "League Comparison", "Top Performers", "Tactical Style Map"])
     
     with tab1:
         # Histogram with percentile markers
@@ -1617,13 +1617,13 @@ elif st.session_state.page == '🏆 Leaderboards':
                 
                 # Determine confidence label and color
                 if silhouette >= 0.50:
-                    confidence_label = "🟢 Excellent"
+                    confidence_label = "Excellent"
                     confidence_color = "success"
                 elif silhouette >= 0.35:
-                    confidence_label = "🟡 Good"
+                    confidence_label = "Good"
                     confidence_color = "warning"
                 else:
-                    confidence_label = "🔴 Overlap Warning"
+                    confidence_label = "Overlap Warning"
                     confidence_color = "error"
                 
                 # Display as compact metric row
@@ -1637,7 +1637,7 @@ elif st.session_state.page == '🏆 Leaderboards':
                 with col_status:
                     st.markdown(f"**Status:** {confidence_label}")
                     if silhouette < 0.35:
-                        st.caption("⚠️ Clusters may overlap. Archetype assignments less reliable.")
+                        st.caption("Clusters may overlap. Archetype assignments less reliable.")
                 
                 st.divider()
             except Exception as e:
@@ -1672,7 +1672,7 @@ elif st.session_state.page == '🏆 Leaderboards':
         
         st.plotly_chart(universe_fig, use_container_width=True)
         
-        st.info("🔍 **How to read this**: The axes represent the primary stylistic variances in the dataset. "
+        st.info("**How to read this**: The axes represent the primary stylistic variances in the dataset. "
                 "Forward-thinking players tend to cluster on one side, while defensive stalwarts occupy the other. "
                 "Hybrid players appeared in the 'gravity' between defined archetypes.")
         col1, col2 = st.columns([2, 1])
@@ -1741,7 +1741,7 @@ elif st.session_state.page == '🏆 Leaderboards':
                 clicked_player = universe_df.iloc[point_index]['Player']
                 
                 # Direct update and rerun
-                st.session_state.page = '🔍 Player Search'
+                st.session_state.page = 'Player Search'
                 st.session_state.player_search = clicked_player
                 # Clear previous selection to force new lookup based on search
                 if 'selected_player' in st.session_state:
@@ -1753,7 +1753,7 @@ elif st.session_state.page == '🏆 Leaderboards':
                 pass
         
         # Explanation
-        with st.expander("ℹ️ How to read the Tactical Style Map"):
+        with st.expander("How to read the Tactical Style Map"):
             st.markdown("""
             **What is this?**
             - Each dot represents a player, positioned based on their playing style (PCA analysis)
@@ -1775,7 +1775,7 @@ elif st.session_state.page == '🏆 Leaderboards':
     
     # Archetype Distribution Statistics
     st.divider()
-    st.subheader("📊 Archetype Distribution")
+    st.subheader("Archetype Distribution")
     
     archetype_counts = df_filtered['Archetype'].value_counts().reset_index()
     archetype_counts.columns = ['Archetype', 'Count']
@@ -1804,4 +1804,4 @@ elif st.session_state.page == '🏆 Leaderboards':
 # ============================================================================
 
 st.divider()
-st.caption("⚽ Football Scouting Dashboard | Global League Coverage 2024-2025 | Built with Streamlit")
+st.caption("Football Scouting Dashboard | Global League Coverage 2024-2025 | Built with Streamlit")

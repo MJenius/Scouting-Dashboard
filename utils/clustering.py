@@ -42,7 +42,7 @@ class PlayerArchetypeClusterer:
         n_clusters: Number of clusters (fixed at 8)
         kmeans: Fitted KMeans model
         pca: Fitted PCA model (2D projection)
-        archetype_profiles: Dict of cluster_id → archetype info
+        archetype_profiles: Dict of cluster_id -> archetype info
         player_archetypes: DataFrame with archetype assignments
     """
     
@@ -99,7 +99,7 @@ class PlayerArchetypeClusterer:
         # 2. Conditional Expansion
         # If cohesion is low (likely due to noise from xG/xA features), try higher K
         if best_score < 0.25:
-            print(f"⚠️  Cluster cohesion low (<0.25). Testing K=10, 12...")
+            print(f"Cluster cohesion low (<0.25). Testing K=10, 12...")
             
             comparison_ks = [10, 12]
             for k in comparison_ks:
@@ -115,9 +115,9 @@ class PlayerArchetypeClusterer:
                 except:
                     pass
         else:
-            print("✓ Cluster cohesion is healthy.")
+            print("Cluster cohesion is healthy.")
 
-        print(f"✓ Selected K={best_k} (Silhouette: {best_score:.3f})")
+        print(f"Selected K={best_k} (Silhouette: {best_score:.3f})")
         return best_k
     
     def fit(self, df: pd.DataFrame, optimize: bool = True) -> 'PlayerArchetypeClusterer':
@@ -151,7 +151,7 @@ class PlayerArchetypeClusterer:
         )
         cluster_labels = self.kmeans.fit_predict(self.scaled_features)
         
-        print(f"✓ K-Means converged in {self.kmeans.n_iter_} iterations")
+        print(f"K-Means converged in {self.kmeans.n_iter_} iterations")
         
         # Analyze cluster characteristics and assign archetypes
         print(f"[Clustering] Analyzing {self.n_clusters} clusters...")
@@ -168,7 +168,7 @@ class PlayerArchetypeClusterer:
         self.player_archetypes['Archetype'] = [archetype_map[c] for c in cluster_labels]
         self.player_archetypes['Archetype_Confidence'] = [confidence_map[c] for c in cluster_labels]
         
-        print(f"✓ Assigned {len(self.player_archetypes)} players to archetypes")
+        print(f"Assigned {len(self.player_archetypes)} players to archetypes")
         
         # Fit PCA for 2D visualization
         print(f"[Clustering] Computing PCA projection...")
@@ -177,9 +177,9 @@ class PlayerArchetypeClusterer:
         self.player_archetypes['PCA_X'] = pca_features[:, 0]
         self.player_archetypes['PCA_Y'] = pca_features[:, 1]
         explained_var = self.pca.explained_variance_ratio_.sum()
-        print(f"✓ PCA explains {explained_var*100:.1f}% of variance")
+        print(f"PCA explains {explained_var*100:.1f}% of variance")
         if explained_var < 0.65:
-             print("⚠️  Warning: PCA explained variance is low (<65%). Consider 3D or t-SNE if visualization is cluttered.")
+             print("Warning: PCA explained variance is low (<65%). Consider 3D or t-SNE if visualization is cluttered.")
         
         return self
     
@@ -435,7 +435,7 @@ class PlayerArchetypeClusterer:
         """
         Calculate Silhouette Score for current clustering.
         
-        Uses sampling for large datasets to avoid O(N²) complexity.
+        Uses sampling for large datasets to avoid O(N^2) complexity.
         Logs warning if score < 0.35 indicating cluster overlap.
         
         Args:
@@ -466,7 +466,7 @@ class PlayerArchetypeClusterer:
             labels = self.kmeans.predict(self.scaled_features)
             n_samples = len(self.scaled_features)
             
-            # Use sampling if dataset is large (O(N²) complexity)
+            # Use sampling if dataset is large (O(N^2) complexity)
             if n_samples > max_samples:
                 sample_size = max_samples
                 logger.info(
@@ -491,11 +491,11 @@ class PlayerArchetypeClusterer:
             # Log warning for overlap
             if score < 0.35:
                 logger.warning(
-                    f"⚠️ Cluster Overlap Warning: Silhouette Score {score:.3f} < 0.35. "
+                    f"Cluster Overlap Warning: Silhouette Score {score:.3f} < 0.35. "
                     "Consider increasing K or reviewing feature selection."
                 )
             else:
-                logger.info(f"✅ Cluster Silhouette Score: {score:.3f} (computed in {elapsed:.2f}s)")
+                logger.info(f"Cluster Silhouette Score: {score:.3f} (computed in {elapsed:.2f}s)")
             
             return self.silhouette_score_
             
@@ -519,7 +519,7 @@ def cluster_players(
     Strictly preserves the input index and length.
     """
     print("\n" + "=" * 80)
-    print("🎯 STARTING POSITIONAL PLAYER CLUSTERING")
+    print("STARTING POSITIONAL PLAYER CLUSTERING")
     print("=" * 80)
     
     # 1. Broad Positional Mapping
@@ -617,7 +617,7 @@ def cluster_players(
         
         # FINAL INTEGRITY CHECK: Ensure we haven't lost any rows
         if len(df_result) < len(df):
-            print(f"⚠️  WARNING: Row count mismatch after clustering ({len(df_result)} vs {len(df)}). Recovering missing rows...")
+            print(f"WARNING: Row count mismatch after clustering ({len(df_result)} vs {len(df)}). Recovering missing rows...")
             missing_indices = df.index.difference(df_result.index)
             if not missing_indices.empty:
                 df_missing = df.loc[missing_indices].copy()
@@ -628,7 +628,7 @@ def cluster_players(
         # Restore original order exactly
         df_result = df_result.reindex(df.index)
 
-    print(f"✓ CLUSTERING COMPLETE: {len(df_result)} players processed.")
+    print(f"CLUSTERING COMPLETE: {len(df_result)} players processed.")
     print("=" * 80)
     
     return df_result, main_clusterer

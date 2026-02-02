@@ -95,8 +95,8 @@ class RadarChartGenerator:
         Generate interactive Plotly radar chart.
         
         Args:
-            target_stats: Dict of feature → value for target player
-            comparison_stats: Dict of feature → value for comparison (optional)
+            target_stats: Dict of feature -> value for target player
+            comparison_stats: Dict of feature -> value for comparison (optional)
             target_name: Name of target player
             comparison_name: Name of comparison player
             use_percentiles: Use percentile values (0-100) vs raw stats
@@ -182,8 +182,8 @@ class RadarChartGenerator:
         Generate high-resolution Matplotlib radar chart and save as PNG.
         
         Args:
-            target_stats: Dict of feature → value for target player
-            comparison_stats: Dict of feature → value for comparison (optional)
+            target_stats: Dict of feature -> value for target player
+            comparison_stats: Dict of feature -> value for comparison (optional)
             target_name: Name of target player
             comparison_name: Name of comparison player
             save_path: Path to save PNG
@@ -692,7 +692,7 @@ class SimilarityEngine:
             
             driver_str = "Driven by " + " & ".join(top_3_labels)
             if all_warnings:
-                driver_str += f" | ⚠️ {all_warnings}"
+                driver_str += f" | {all_warnings}"
             if sim > 95:
                 driver_str += " (Stylistic Twin)"
                 
@@ -818,7 +818,7 @@ class SimilarityEngine:
             is_goalkeeper: Return goalkeeper-specific metrics instead of outfield metrics
             
         Returns:
-            Dict mapping feature → value, or None if not found
+            Dict mapping feature -> value, or None if not found
         """
         idx = self._find_player_index(player_name)
         if idx is None:

@@ -210,7 +210,7 @@ class PlotlyVisualizations:
         Create dataframe for percentile progress bars (for st.dataframe).
         
         Args:
-            percentiles: Dict mapping feature → percentile rank (0-100)
+            percentiles: Dict mapping feature -> percentile rank (0-100)
             max_cols: Max columns per row
             
         Returns:
@@ -221,15 +221,15 @@ class PlotlyVisualizations:
             # Create bar representation
             bar_length = 20
             filled = int(pct / 5)
-            bar = "█" * filled + "░" * (bar_length - filled)
+            bar = "|" * filled + "-" * (bar_length - filled)
             
             # Color coding
             if pct >= 80:
-                color = "🟢"  # Green
+                color = "High"
             elif pct >= 50:
-                color = "🟡"  # Yellow
+                color = "Avg"
             else:
-                color = "🔴"  # Red
+                color = "Low"
             
             data.append({
                 'Feature': feature,
@@ -540,8 +540,8 @@ class PlotlyVisualizations:
         fig.update_layout(
             template='plotly_dark',
             hovermode='closest',
-            xaxis_title='Playing Style Axis 1 (← to →)',
-            yaxis_title='Playing Style Axis 2 (← to →)',
+            xaxis_title='Playing Style Axis 1 (<- to ->)',
+            yaxis_title='Playing Style Axis 2 (<- to ->)',
             xaxis=dict(
                 showgrid=True,
                 gridwidth=1,
@@ -586,8 +586,8 @@ class PlotlyVisualizations:
                         symbol='star',
                         line=dict(width=3, color='yellow'),
                     ),
-                    name=f'⭐ {highlight_player}',
-                    hovertemplate=f'<b>⭐ {highlight_player}</b><br>' +
+                    name=f'Highlight: {highlight_player}',
+                    hovertemplate=f'<b>{highlight_player}</b><br>' +
                                  'Squad: %{customdata[1]}<br>' +
                                  'League: %{customdata[2]}<br>' +
                                  'Position: %{customdata[4]}<br>' +

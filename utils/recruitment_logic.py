@@ -69,7 +69,7 @@ def project_to_tier(
     # Actually, almost all stats suffer from league quality differences.
     # Exceptions might be physical attributes (if we had them), but we don't.
     
-    print(f"ℹ️  Projecting performance to {target_tier} (Coeff: {target_coeff})")
+    print(f"Projecting performance to {target_tier} (Coeff: {target_coeff})")
     
     for idx, row in df_proj.iterrows():
         # Source league coefficient

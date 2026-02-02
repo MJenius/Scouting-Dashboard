@@ -13,7 +13,7 @@ def empirical_backtest(current_df, historical_df):
     """
     Compare actual performance delta vs predicted delta for players who moved up.
     """
-    print("\n🔬 STARTING EMPIRICAL BACKTEST (Historical Data Found)")
+    print("\nSTARTING EMPIRICAL BACKTEST (Historical Data Found)")
     
     # 1. Identify movers (Heuristic: Same Name+Year, diff League)
     # Since we have separate files, we match strictly on Name + Birthday (if avail) or just Name.
@@ -27,14 +27,14 @@ def theoretical_consistency_check(df):
     Verify internal consistency of the projection logic.
     Check: Does Projecting Down then Up return the original value?
     """
-    print("\n🧪 STARTING THEORETICAL CONSISTENCY CHECK (No Historical Data)")
+    print("\nSTARTING THEORETICAL CONSISTENCY CHECK (No Historical Data)")
     print("Rationale: Verifying that Step-Up logic is mathematically consistent across tiers.")
     
     # Filter for PL players
     pl_players = df[df['League'] == 'Premier League'].copy()
     
     if len(pl_players) == 0:
-        print("⚠️ No Premier League players found for consistency check.")
+        print("No Premier League players found for consistency check.")
         return
 
     # Select numeric columns
@@ -124,19 +124,19 @@ def main():
             df_history = data_engine.load_data(history_path)
             empirical_backtest(df_current, df_history)
         else:
-            print(f"ℹ️ No historical data found at {history_path}.")
+            print(f"No historical data found at {history_path}.")
             results = theoretical_consistency_check(df_current)
             
             print("\nrecommendation:")
             if results:
                 for pos, mbe in results.items():
                     if abs(mbe) > 5.0:
-                        print(f"⚠️  {pos} projections have high drift ({mbe:+.1f}%). Check coefficients.")
+                        print(f"{pos} projections have high drift ({mbe:+.1f}%). Check coefficients.")
                     else:
-                        print(f"✅ {pos} projections are mathematically consistent.")
+                        print(f"{pos} projections are mathematically consistent.")
                         
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
             
 if __name__ == "__main__":
     main()

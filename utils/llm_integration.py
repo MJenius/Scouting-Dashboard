@@ -46,7 +46,7 @@ class LLMScoutNarrativeGenerator:
         self.model = None
         
         if not GEMINI_AVAILABLE:
-            print("⚠ google-generativeai package not installed. AI features disabled.")
+            print("google-generativeai package not installed. AI features disabled.")
             self.use_llm = False
             return
         
@@ -55,20 +55,20 @@ class LLMScoutNarrativeGenerator:
             api_key = api_key or os.getenv('GEMINI_API_KEY')
             
             if api_key:
-                print(f"✓ API key found (starts with: {api_key[:10]}...)")
+                print(f"API key found (starts with: {api_key[:10]}...)")
                 try:
                     genai.configure(api_key=api_key)
                     # Use Gemini 2.5 Flash (latest stable model)
                     # Note: Must use full path 'models/gemini-2.5-flash'
                     self.model = genai.GenerativeModel('models/gemini-2.5-flash')
-                    print("✓ Gemini API initialized successfully with gemini-2.5-flash")
+                    print("Gemini API initialized successfully with gemini-2.5-flash")
                 except Exception as e:
-                    print(f"⚠ Gemini API initialization failed: {e}")
-                    print("⚠ Falling back to rule-based narrative generation")
+                    print(f"Gemini API initialization failed: {e}")
+                    print("Falling back to rule-based narrative generation")
                     self.use_llm = False
             else:
-                print("⚠ No Gemini API key found in environment or parameters.")
-                print("⚠ Please set GEMINI_API_KEY in your .env file.")
+                print("No Gemini API key found in environment or parameters.")
+                print("Please set GEMINI_API_KEY in your .env file.")
                 self.use_llm = False
     
     def _build_prompt(

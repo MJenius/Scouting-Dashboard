@@ -33,16 +33,16 @@ class ConfigLoader:
         config_path = Path(__file__).parent.parent / 'config.yaml'
         
         if not config_path.exists():
-            print(f"⚠️  Config file not found at {config_path}")
+            print(f"Config file not found at {config_path}")
             self._config = self._get_default_config()
             return
         
         try:
             with open(config_path, 'r') as f:
                 self._config = yaml.safe_load(f)
-            print(f"✓ Configuration loaded from {config_path}")
+            print(f"Configuration loaded from {config_path}")
         except Exception as e:
-            print(f"⚠️  Error loading config: {e}. Using defaults.")
+            print(f"Error loading config: {e}. Using defaults.")
             self._config = self._get_default_config()
     
     def get(self, key: str, default: Any = None) -> Any:

@@ -107,7 +107,7 @@ class ScoutNarrativeGenerator:
                         'full_report': ai_narrative
                     }
             except Exception as e:
-                print(f"⚠ AI generation failed ({e}). Falling back to rule-based.")
+                print(f"AI generation failed ({e}). Falling back to rule-based.")
         
         # Rule-Based Fallback
         
@@ -280,21 +280,21 @@ class ScoutNarrativeGenerator:
         
         # Determine recommendation tier
         if avg_percentile >= 80 and age <= 26:
-            rec_text += f"🌟 **HIGH PRIORITY TARGET** - {name.split()[-1]} demonstrates elite-level performance "
+            rec_text += f"**HIGH PRIORITY TARGET** - {name.split()[-1]} demonstrates elite-level performance "
             rec_text += f"in the {league} with {age_category.lower()} age profile. Strong candidate for immediate first-team impact "
             rec_text += "at higher tier. Recommend comprehensive scouting package with live match observations."
             
         elif avg_percentile >= 70 and age <= 28:
-            rec_text += f"⭐ **PROMISING PROSPECT** - Above-average metrics suggest {name.split()[-1]} could contribute "
+            rec_text += f"**PROMISING PROSPECT** - Above-average metrics suggest {name.split()[-1]} could contribute "
             rec_text += f"effectively with proper development. {age_category} player with clear pathway to progression. "
             rec_text += "Consider for squad depth or development loan."
             
         elif avg_percentile >= 60:
-            rec_text += f"✓ **DEPTH OPTION** - Solid statistical profile indicates reliable squad player potential. "
+            rec_text += f"**DEPTH OPTION** - Solid statistical profile indicates reliable squad player potential. "
             rec_text += f"Could provide cover in {position} position. Monitor for 6-12 months before final decision."
             
         else:
-            rec_text += f"ℹ️ **MONITOR STATUS** - Current metrics don't suggest immediate transfer priority. "
+            rec_text += f"**MONITOR STATUS** - Current metrics don't suggest immediate transfer priority. "
             rec_text += "Track development trajectory before revisiting."
         
             rec_text += "Track development trajectory before revisiting."
@@ -490,7 +490,7 @@ class ScoutNarrativeGenerator:
         # Risk assessment for high performers
         if max_pct >= 90 and variance > 200:
             risk = (
-                f"⚠️  **Risk Alert**: Elite shooting ({100 - max_pct:.0f}th percentile) but low volume "
+                f"**Risk Alert**: Elite shooting ({100 - max_pct:.0f}th percentile) but low volume "
                 f"({min_pct:.0f}th percentile on Sh/90). May indicate overperformance or "
                 f"limited playing time. Monitor sustainability."
             )

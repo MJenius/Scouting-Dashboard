@@ -200,7 +200,7 @@ def generate_summary(df, total_processed, output_path):
 
 def run_ingestion():
     """
-    Main ETL function: Load CSV → Process → Ingest to SQLite.
+    Main ETL function: Load CSV -> Process -> Ingest to SQLite.
     
     Steps:
     1. Create database tables if they don't exist
@@ -212,25 +212,25 @@ def run_ingestion():
     logger = setup_logging()
     
     logger.info("=" * 80)
-    logger.info("🚀 STARTING ETL INGESTION")
+    logger.info("STARTING ETL INGESTION")
     logger.info("=" * 80)
     
     # Step 1: Create database tables
     logger.info("[1/4] Creating database tables...")
     Base.metadata.create_all(bind=engine)
-    logger.info("✓ Tables ready")
+    logger.info("Tables ready")
     
     # Step 2: Load and process data using existing data_engine
     logger.info("[2/4] Processing CSV data...")
     csv_path = os.path.join(project_root, "english_football_pyramid_master.csv")
     
     if not os.path.exists(csv_path):
-        logger.error(f"❌ Error: CSV file not found at {csv_path}")
+        logger.error(f"Error: CSV file not found at {csv_path}")
         return
     
     result = process_all_data(csv_path)
     df = result['dataframe']
-    logger.info(f"✓ Processed {len(df)} players from {df['League'].nunique()} leagues")
+    logger.info(f"Processed {len(df)} players from {df['League'].nunique()} leagues")
     
     # Step 3: Transform and prepare for database insertion
     logger.info("[3/4] Transforming data for database...")
@@ -271,7 +271,7 @@ def run_ingestion():
                 upsert_players(session, players_batch)
                 session.commit()
                 total_processed += len(players_batch)
-                logger.info(f"  → Processed {total_processed} players...")
+                logger.info(f"  - Processed {total_processed} players...")
                 players_batch = []
         
         if players_batch:
@@ -279,11 +279,11 @@ def run_ingestion():
             session.commit()
             total_processed += len(players_batch)
         
-        logger.info(f"✓ Transformed {total_processed} players")
+        logger.info(f"Transformed {total_processed} players")
         
     except Exception as e:
         session.rollback()
-        logger.error(f"❌ Error during ingestion: {e}")
+        logger.error(f"Error during ingestion: {e}")
         raise
     finally:
         session.close()
@@ -295,20 +295,20 @@ def run_ingestion():
     try:
         summary_path = os.path.join(project_root, 'etl', 'data_summary.json')
         generate_summary(df, total_processed, summary_path)
-        logger.info(f"✓ Data summary saved to {summary_path}")
+        logger.info(f"Data summary saved to {summary_path}")
     except Exception as e:
-        logger.error(f"❌ Failed to generate summary: {e}")
+        logger.error(f"Failed to generate summary: {e}")
 
     session = SessionLocal()
     try:
         player_count = session.query(Player).count()
         league_counts = session.query(Player.league).distinct().count()
-        logger.info(f"✓ Database contains {player_count} players across {league_counts} leagues")
+        logger.info(f"Database contains {player_count} players across {league_counts} leagues")
     finally:
         session.close()
     
     logger.info("=" * 80)
-    logger.info(f"✅ Ingested {total_processed} players into SQLite.")
+    logger.info(f"Ingested {total_processed} players into SQLite.")
     logger.info("=" * 80)
 
 

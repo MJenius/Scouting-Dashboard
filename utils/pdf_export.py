@@ -38,24 +38,24 @@ def sanitize_text_for_pdf(text: str) -> str:
     # Manual replacements for common football symbols that we want to keep as text
     # Using hex codes for absolute certainty
     replacements = {
-        '\u2796': '-', # ➖ Heavy Minus
-        '\u2212': '-', # − Minus
-        '\u2013': '-', # – En Dash
-        '\u2014': '-', # — Em Dash
-        '\u2015': '-', # ― Horizontal Bar
-        '\u2018': "'", # ‘
-        '\u2019': "'", # ’
-        '\u201c': '"', # “
-        '\u201d': '"', # ”
-        '\u2026': '...', # …
-        '\u2022': '*', # •
-        '\u2192': '->', # →
-        '\u2191': '^', # ↑ 
-        '\u2193': 'v', # ↓
-        '\u2713': '[OK]', # ✓
-        '\u2717': '[X]', # ✗
-        '\u26a0': '[!]', # ⚠
-        '\xa3': 'GBP ', # £
+        '\u2796': '-', # Heavy Minus
+        '\u2212': '-', # Minus
+        '\u2013': '-', # En Dash
+        '\u2014': '-', # Em Dash
+        '\u2015': '-', # Horizontal Bar
+        '\u2018': "'", # Quote
+        '\u2019': "'", # Quote
+        '\u201c': '"', # Quote
+        '\u201d': '"', # Quote
+        '\u2026': '...', # Ellipsis
+        '\u2022': '*', # Bullet
+        '\u2192': '->', # Arrow
+        '\u2191': '^', # Arrow
+        '\u2193': 'v', # Arrow
+        '\u2713': '[OK]', # OK
+        '\u2717': '[X]', # X
+        '\u26a0': '[!]', # Caution
+        '\xa3': 'GBP ', # GBP
     }
     
     for uni, asc in replacements.items():
