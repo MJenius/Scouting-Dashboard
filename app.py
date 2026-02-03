@@ -41,7 +41,7 @@ from utils.recruitment_logic import project_to_tier
 from utils.llm_integration import AgenticScoutChat, is_ollama_available, generate_llm_narrative
 import plotly.express as px
 import plotly.graph_objects as go
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 
 # Import API client for FastAPI backend integration
 try:
@@ -101,6 +101,7 @@ if 'filters' not in st.session_state:
         'leagues': LEAGUES,
         'positions': PRIMARY_POSITIONS,
         'min_90s': 0.5,
+        'metrics': {}  # Dynamic metric filters (e.g., {'Gls/90': 0.5})
     }
 
 if 'page' not in st.session_state:
@@ -215,6 +216,12 @@ with st.sidebar:
             (df['Primary_Pos'].isin(selected_positions)) &
             (df['90s'] >= min_90s)
         ]
+        
+        # Apply metric filters if they exist
+        if 'metrics' in st.session_state.filters:
+            for metric, min_val in st.session_state.filters['metrics'].items():
+                if metric in filtered.columns:
+                    filtered = filtered[filtered[metric] >= min_val]
         
         st.metric("Players (Filtered)", len(filtered))
         st.metric("Leagues", len(selected_leagues))
@@ -592,13 +599,21 @@ def create_pitch_visualization(shadow_squad):
 def apply_filters(df):
     """Apply global filters to dataframe."""
     filters = st.session_state.filters
-    return df[
+    df_out = df[
         (df['Age'] >= filters['age_min']) &
         (df['Age'] <= filters['age_max']) &
         (df['League'].isin(filters['leagues'])) &
         (df['Primary_Pos'].isin(filters['positions'])) &
         (df['90s'] >= filters['min_90s'])
     ]
+    
+    # Apply metric filters
+    if 'metrics' in filters:
+        for metric, min_val in filters['metrics'].items():
+            if metric in df_out.columns:
+                df_out = df_out[df_out[metric] >= min_val]
+                
+    return df_out
 
 # Ensure data is loaded
 ensure_data_loaded()
@@ -632,65 +647,164 @@ for page_name, col in pages.items():
 st.divider()
 
 # ============================================================================
-# PAGE 1: PLAYER SEARCH
+# GLOBAL AGENTIC CHAT INTERFACE (Processes intents BEFORE page rendering)
 # ============================================================================
 
 if 'chat_messages' not in st.session_state:
     st.session_state.chat_messages = []
 
-if st.session_state.page == 'Player Search':
-    st.header("Player Search")
+def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
+    """
+    Route the AI's intent to the appropriate page and apply filters.
+    Returns a response message describing what was done.
+    """
+    action = api_params.get('action')
+    target_page = api_params.get('target_page')
     
-    # AGENTIC CHAT INTERFACE
-    with st.expander("💬 Agentic Scout Chat", expanded=False):
-        st.caption("Ask questions like 'Find me a young striker in the Premier League who is prolific'")
+    response_parts = []
+    needs_rerun = False
+    
+    # Navigate to target page
+    valid_pages = ['Leaderboards', 'Head-to-Head', 'Player Search', 'Hidden Gems', 'Squad Analysis', 'Squad Planner']
+    if target_page and target_page in valid_pages:
+        st.session_state.page = target_page
+        response_parts.append(f"Navigating to **{target_page}**")
+        needs_rerun = True
+    
+    # Apply page-specific filters based on action
+    if action == 'leaderboard':
+        # Set Leaderboards page filters
+        if 'league' in api_params:
+            st.session_state.leaderboard_league = api_params['league']
+            response_parts.append(f"League: {api_params['league']}")
+        if 'position' in api_params:
+            st.session_state.leaderboard_position = api_params['position']
+            response_parts.append(f"Position: {api_params['position']}")
+        if 'metric' in api_params:
+            st.session_state.leaderboard_metric = api_params['metric']
+            response_parts.append(f"Metric: {api_params['metric']}")
+        needs_rerun = True
+    
+    elif action == 'compare':
+        # Set Head-to-Head page filters  
+        # Player selection uses "Player (Squad)" format - we need to fuzzy match
+        df = st.session_state.df_clustered
+        player_options = [f"{row['Player']} ({row['Squad']})" for _, row in df.iterrows()]
+        player_options = sorted(list(set(player_options)))
         
-        # Display chat history
-        for msg in st.session_state.chat_messages:
+        def find_best_match(query: str, options: List[str]) -> str:
+            """Find the best matching player option using substring matching."""
+            query_lower = query.lower()
+            # First try exact substring match
+            for opt in options:
+                if query_lower in opt.lower():
+                    return opt
+            # Fallback: return first option or None
+            return options[0] if options else None
+        
+        if 'player_name' in api_params:
+            matched = find_best_match(api_params['player_name'], player_options)
+            if matched:
+                st.session_state.player1_select = matched
+                response_parts.append(f"Player 1: {matched}")
+        if 'compare_player' in api_params:
+            matched = find_best_match(api_params['compare_player'], player_options)
+            if matched:
+                st.session_state.player2_select = matched
+                response_parts.append(f"Player 2: {matched}")
+        needs_rerun = True
+    
+    elif action == 'hidden_gems':
+        # Set Hidden Gems page filters
+        if 'max_age' in api_params:
+            st.session_state.gems_max_age = api_params['max_age']
+            response_parts.append(f"Max Age: {api_params['max_age']}")
+        needs_rerun = True
+    
+    elif action in ['search', 'find_similar']:
+        # Set Player Search page filters
+        if 'player_name' in api_params:
+            st.session_state.player_search_query = api_params['player_name']
+            response_parts.append(f"Searching: {api_params['player_name']}")
+        needs_rerun = True
+    
+    # Also apply global filters (age, league, position for sidebar)
+    if 'min_age' in api_params: 
+        st.session_state.filters['age_min'] = api_params['min_age']
+    if 'max_age' in api_params: 
+        st.session_state.filters['age_max'] = api_params['max_age']
+    if 'league' in api_params: 
+        st.session_state.filters['leagues'] = [api_params['league']]
+    
+    if 'position' in api_params:
+        pos = api_params['position']
+        # Map generic Chat positions to Dashboard specific positions
+        if pos == 'DF':
+            st.session_state.filters['positions'] = ['CB', 'FB']
+        elif pos == 'MF':
+            st.session_state.filters['positions'] = ['DM', 'CM', 'AM']
+        elif pos in PRIMARY_POSITIONS:
+            st.session_state.filters['positions'] = [pos]
+    
+    return " | ".join(response_parts) if response_parts else "Filters updated", needs_rerun
+
+# Global Chat Expander
+with st.expander("Agentic Scout Chat", expanded=False):
+    st.caption("Ask questions like 'Find me the best striker in Serie A' or 'Compare Haaland with Mbappe'")
+    
+    # Scrollable chat container with fixed height
+    chat_container = st.container(height=300)
+    
+    with chat_container:
+        # Only show last 10 messages to keep UI clean
+        messages_to_show = st.session_state.chat_messages[-10:] if len(st.session_state.chat_messages) > 10 else st.session_state.chat_messages
+        for msg in messages_to_show:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
+    
+    # Chat input (outside scrollable container)
+    if prompt := st.chat_input("Ask the AI Scout..."):
+        # Add user message
+        st.session_state.chat_messages.append({"role": "user", "content": prompt})
         
-        # Chat input
-        if prompt := st.chat_input("Ask the AI Scout..."):
-            # Add user message
-            st.session_state.chat_messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+        # Process with Agentic AI
+        chat_agent = AgenticScoutChat()
+        if chat_agent.available:
+            filters = chat_agent.parse_intent(prompt)
             
-            # Process with Agentic AI
-            with st.chat_message("assistant"):
-                with st.spinner("Analyzing request..."):
-                    chat_agent = AgenticScoutChat()
-                    if chat_agent.available:
-                        filters = chat_agent.parse_intent(prompt)
-                        
-                        if "error" in filters:
-                            response_text = f"❌ Error: {filters['error']}"
-                        else:
-                            response_text = "✅ **Filters Applied:**\n"
-                            for k, v in filters.items():
-                                response_text += f"- `{k}`: {v}\n"
-                            
-                            # Update Global Filters based on AI intent
-                            # This connects the Chat to the Dashboard logic
-                            api_params = chat_agent.get_api_params(filters)
-                            
-                            if 'min_age' in api_params: st.session_state.filters['age_min'] = api_params['min_age']
-                            if 'max_age' in api_params: st.session_state.filters['age_max'] = api_params['max_age']
-                            if 'league' in api_params: st.session_state.filters['leagues'] = [api_params['league']]
-                            if 'position' in api_params: st.session_state.filters['positions'] = [api_params['position']]
-                            # Note: metric thresholds (min_goals) would need DataFrame filtering logic updates
-                            
-                            response_text += "\n*Dashboard filters have been updated.*"
-                    else:
-                        response_text = "⚠️ **Local AI is Offline.** Please start Ollama to use this feature."
+            if "error" in filters:
+                response_text = f"Error: {filters['error']}"
+                needs_rerun = False
+            else:
+                # Get API params with actions
+                api_params = chat_agent.get_api_params(filters)
                 
-                st.markdown(response_text)
-                st.session_state.chat_messages.append({"role": "assistant", "content": response_text})
-            
+                # Dispatch action (navigate + apply filters)
+                action_result, needs_rerun = dispatch_agentic_action(api_params)
+                
+                # Build response
+                response_text = f"**Action:** {action_result}\n\n"
+                response_text += "**Parsed Intent:**\n"
+                for k, v in filters.items():
+                    response_text += f"- `{k}`: {v}\n"
+        else:
+            response_text = "**Local AI is Offline.** Please start Ollama to use this feature."
+            needs_rerun = False
+        
+        st.session_state.chat_messages.append({"role": "assistant", "content": response_text})
+        
+        # CRITICAL: Rerun to apply navigation/filter changes immediately
+        if needs_rerun:
             st.rerun()
 
-    st.divider()
+st.divider()
+
+# ============================================================================
+# PAGE 1: PLAYER SEARCH
+# ============================================================================
+
+if st.session_state.page == 'Player Search':
+    st.header("Player Search")
     
     col1, col2 = st.columns([3, 1])
     
@@ -799,8 +913,13 @@ if st.session_state.page == 'Player Search':
                         confidence_label = "Directional Data"
                         confidence_desc = "Further vetting required - use with caution"
                     else:
-                        confidence_label = "Incomplete Data"
-                        confidence_desc = "Caution advised - limited metrics available"
+                        confidence_label = "Low Data"
+                        confidence_desc = "Very limited statistical coverage"
+                        
+                    color = "green" if completeness >= 70 else "orange" if completeness >= 40 else "red"
+                    st.caption(f":{color}[{confidence_label}]: {confidence_desc}")
+
+
 
                     col1, col2 = st.columns([2, 1])
                     with col1:
@@ -1329,27 +1448,65 @@ if st.session_state.page == 'Player Search':
         else:
             st.info("No players found. Try a different search term.")
     else:
-        # Show Trending Prospects when search is empty
-        st.subheader("Trending Prospects (U23, Elite Stats)")
-        st.write("Young players with exceptional performance metrics (>80th percentile)")
-        
-        # Filter for trending prospects
-        trending = df[
-            (df['Age'] <= 23) &
-            ((df['Gls/90_pct'] >= 80) | (df['Ast/90_pct'] >= 80))
-        ].sort_values('Gls/90_pct', ascending=False)
-        
-        if len(trending) > 0:
-            display_cols = ['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'xG90', 'Ast/90', 'xA90', 'Archetype']
-            display_cols = [col for col in display_cols if col in trending.columns]
+        # Check if filters are active (subset of data)
+        # Note: We check if len(df_filtered) < len(df) OR if metrics are in filters
+        filters_active = len(df_filtered) < len(df) or (
+            'metrics' in st.session_state.filters and st.session_state.filters['metrics']
+        )
+
+        if filters_active:
+             # SHOW FILTERED RESULTS TABLE
+            st.subheader(f"Filtered Candidates ({len(df_filtered)})")
+            
+            # Determine columns to show
+            cols_to_show = ['Player', 'Squad', 'Age', 'Primary_Pos', '90s', 'Gls/90', 'Ast/90', 'xG90', 'xA90', 'Archetype']
+            
+            # Sort by relevant metric if metric filter exists, else by 90s or value
+            sort_col = '90s'
+            ascending = False
+            
+            if 'metrics' in st.session_state.filters and st.session_state.filters['metrics']:
+                # Sort by the first metric filter
+                first_metric = list(st.session_state.filters['metrics'].keys())[0]
+                sort_col = first_metric
+            
+            display_df = df_filtered.sort_values(sort_col, ascending=False).head(20)
             
             st.dataframe(
-                trending[display_cols].head(10),
+                display_df[cols_to_show],
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                column_config={
+                    "Player": st.column_config.TextColumn("Player", width="medium"),
+                    "Gls/90": st.column_config.NumberColumn("Goals/90", format="%.2f"),
+                    "Ast/90": st.column_config.NumberColumn("Ast/90", format="%.2f"),
+                    "xG90": st.column_config.NumberColumn("xG/90", format="%.2f"),
+                }
             )
+            st.caption("Showing top 20 matches based on active filters.")
+            
         else:
-            st.info("No trending prospects found with current filters.")
+            # Show Trending Prospects when search is empty AND no specific filters
+            st.subheader("Trending Prospects (U23, Elite Stats)")
+            st.write("Young players with exceptional performance metrics (>80th percentile)")
+            
+            # Filter for trending prospects
+            trending = df[
+                (df['Age'] <= 23) &
+                ((df['Gls/90_pct'] >= 80) | (df['Ast/90_pct'] >= 80))
+            ].sort_values('Gls/90_pct', ascending=False)
+            
+            if len(trending) > 0:
+                display_cols = ['Player', 'Squad', 'League', 'Age', 'Primary_Pos', 'Gls/90', 'xG90', 'Ast/90', 'xA90', 'Archetype']
+                display_cols = [col for col in display_cols if col in trending.columns]
+                
+                st.dataframe(
+                    trending[display_cols].head(10),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.info("No trending prospects found with current filters.")
 
 # ============================================================================
 # PAGE 2: HEAD-TO-HEAD
@@ -1583,8 +1740,26 @@ elif st.session_state.page == 'Hidden Gems':
         # -------------------------------------------------------------------------
         st.subheader("Discovery Filters")
         
-        tab_efficiency, tab_style, tab_basics = st.tabs(["Efficiency", "The Unicorn Finder", "Basics"])
+        # Tabs reordered: Basics first, then Efficiency
+        tab_basics, tab_efficiency = st.tabs(["Basics", "Efficiency"])
         
+        with tab_basics:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                # Use AI-set age if available, otherwise default to 24
+                default_max_age = st.session_state.get('gems_max_age', 24)
+                max_age = st.slider("Max Age:", 16, 35, default_max_age)
+                # Sync back to session state
+                st.session_state.gems_max_age = max_age
+            with col2:
+                min_90s = st.slider("Min 90s Played:", 0, 30, 5, step=1)
+            with col3:
+                # Ensure percentile cols exist
+                if 'Gls/90_pct' in gems.columns:
+                     min_percentile = st.slider("Min Gls/90 Percentile:", 0, 100, 0)
+                else:
+                     min_percentile = 0
+
         with tab_efficiency:
             st.caption("Find players who overperform their expected metrics (Clinical Finishing & Creativity).")
             col1, col2 = st.columns(2)
@@ -1595,37 +1770,16 @@ elif st.session_state.page == 'Hidden Gems':
                 min_creat_eff = st.slider("Min Creative Efficiency (Ast - xA):", -0.5, 1.0, 0.0, step=0.05,
                                           help="Positive = Assisting more than expected.")
 
-        with tab_style:
-            st.caption("Find players with unique, hybrid profiles that defy standard categorization.")
-            unicorn_score = st.slider("Stylistic Uniqueness (Unicorn Score):", 0, 100, 0,
-                                      help="0 = Generic Archetype, 100 = Unique Stylistic Outlier.")
-            
-        with tab_basics:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                max_age = st.slider("Max Age:", 16, 35, 24)
-            with col2:
-                min_90s = st.slider("Min 90s Played:", 0.0, 30.0, 5.0)
-            with col3:
-                # Ensure percentile cols exist
-                if 'Gls/90_pct' in gems.columns:
-                     min_percentile = st.slider("Min Gls/90 Percentile:", 0, 100, 0)
-                else:
-                     min_percentile = 0
-
         # Apply Filters
         # Ensure columns exist (patch for cached data)
         if 'Finishing_Efficiency' not in gems.columns and 'Gls/90' in gems.columns: 
             gems['Finishing_Efficiency'] = gems['Gls/90'] - gems.get('xG90', 0)
         if 'Creative_Efficiency' not in gems.columns and 'Ast/90' in gems.columns: 
             gems['Creative_Efficiency'] = gems['Ast/90'] - gems.get('xA90', 0)
-        if 'Outlier_Score' not in gems.columns: 
-            gems['Outlier_Score'] = 0.0
 
         filtered_gems = gems[
             (gems.get('Finishing_Efficiency', 0) >= min_fin_eff) &
             (gems.get('Creative_Efficiency', 0) >= min_creat_eff) &
-            (gems.get('Outlier_Score', 0) >= unicorn_score) &
             (gems['Age'] <= max_age) &
             (gems['90s'] >= min_90s)
         ]
@@ -1640,13 +1794,10 @@ elif st.session_state.page == 'Hidden Gems':
         st.subheader(f"Results ({len(filtered_gems)} players)")
         
         if not filtered_gems.empty:
-            # Sort
-            if unicorn_score > 0:
-                filtered_gems = filtered_gems.sort_values('Outlier_Score', ascending=False)
-            else:
-                filtered_gems = filtered_gems.sort_values('Finishing_Efficiency', ascending=False)
+            # Sort by Finishing Efficiency
+            filtered_gems = filtered_gems.sort_values('Finishing_Efficiency', ascending=False)
                 
-            cols = ['Player', 'Age', 'League', 'Squad', 'Archetype', 'Finishing_Efficiency', 'Creative_Efficiency', 'Outlier_Score']
+            cols = ['Player', 'Age', 'League', 'Squad', 'Archetype', 'Finishing_Efficiency', 'Creative_Efficiency']
             # Add Gls/90 to view context
             if 'Gls/90' in filtered_gems.columns: cols.append('Gls/90')
 

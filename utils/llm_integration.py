@@ -65,36 +65,61 @@ STAT_KEY_MAPPING = {
 SYSTEM_PROMPT_FILTER = """You are a football scouting assistant. 
 Output ONLY valid JSON. No markdown, no explanations, no chat.
 
-Your task is to convert the user's scouting query into a JSON filter object.
+Your task is to convert the user's scouting query into a JSON object with an ACTION and FILTERS.
 
 AVAILABLE SCHEMA (Use only these keys):
 {
+    "action": str (REQUIRED: "leaderboard" | "compare" | "search" | "find_similar" | "hidden_gems"),
+    "target_page": str (Auto-mapped from action: "Leaderboards" | "Head-to-Head" | "Player Search" | "Hidden Gems"),
+    "metric": str (For leaderboards: "Gls/90", "Ast/90", "xG90", "xA90", "Sh/90", "SoT/90", "TklW/90", "Int/90"),
+    "player_name": str (For search/compare - the main player),
+    "compare_player": str (For compare - the second player),
     "min_age": int,
     "max_age": int,
-    "league": str (Exact match: 'Premier League', 'Championship', 'League One', 'League Two', 'National League', 'Bundesliga', 'La Liga', 'Serie A', 'Ligue 1'),
-    "position": str (Exact match: 'FW', 'MF', 'DF', 'GK'),
-    "min_goals": float (maps to Gls/90),
-    "min_assists": float (maps to Ast/90),
-    "min_xg": float (maps to xG90),
-    "min_xa": float (maps to xA90),
-    "min_dominance": float (Z-score, e.g. 1.0 = good, 2.0 = elite)
+    "league": str (Exact match: "Premier League", "Championship", "League One", "League Two", "National League", "Bundesliga", "La Liga", "Serie A", "Ligue 1"),
+    "position": str (Exact match: "FW", "MF", "DF", "GK"),
+    "min_goals": float,
+    "min_assists": float,
+    "min_dominance": float (Z-score: 1.0 = good, 2.0 = elite)
 }
 
-MAPPING RULES:
+ACTION ROUTING RULES:
+- "best X" / "top scorers" / "leaders" / "ranking"           -> {"action": "leaderboard", "target_page": "Leaderboards"}
+- "compare X with Y" / "X vs Y"                               -> {"action": "compare", "target_page": "Head-to-Head"}
+- "find players like X" / "similar to X"                      -> {"action": "find_similar", "target_page": "Player Search"}
+- "hidden gems" / "undervalued" / "underrated" / "bargain"    -> {"action": "hidden_gems", "target_page": "Hidden Gems"}
+- "search for X" / "find X" / "show me X" (specific player)   -> {"action": "search", "target_page": "Player Search"}
+
+METRIC INFERENCE RULES:
+- "scorer", "goals", "prolific", "striker"   -> metric: "Gls/90"
+- "creator", "assists", "playmaker"          -> metric: "Ast/90"
+- "xg", "expected goals"                     -> metric: "xG90"
+- "interceptor", "defensive mid"             -> metric: "Int/90"
+- "tackler", "ball winner"                   -> metric: "TklW/90"
+- "crosser", "winger"                        -> metric: "Crs/90"
+
+AGE MAPPING RULES:
 - "Young" -> {"max_age": 23}
 - "Prime" or "Peak" -> {"min_age": 24, "max_age": 29}
 - "Experienced" -> {"min_age": 30}
-- "Striker" -> {"position": "FW"}
+
+POSITION MAPPING RULES:
+- "Striker" / "Forward" -> {"position": "FW"}
 - "Midfielder" -> {"position": "MF"}
 - "Defender" -> {"position": "DF"}
-- "Keeper" -> {"position": "GK"}
-- "Prolific" -> {"min_goals": 0.5}
-- "Creative" -> {"min_xa": 0.25}
-- "Solid" -> {"min_dominance": 0.5}
-- "Elite" or "God-tier" -> {"min_dominance": 2.0}
+- "Goalkeeper" / "Keeper" -> {"position": "GK"}
 
-Example User Input: "Find me a young striker in the Premier League who is prolific"
-Example JSON Output: {"max_age": 23, "position": "FW", "league": "Premier League", "min_goals": 0.5}
+Example 1: "Find me the best striker in Serie A"
+Output: {"action": "leaderboard", "target_page": "Leaderboards", "position": "FW", "league": "Serie A", "metric": "Gls/90"}
+
+Example 2: "Compare Haaland with Mbappe"
+Output: {"action": "compare", "target_page": "Head-to-Head", "player_name": "Haaland", "compare_player": "Mbappe"}
+
+Example 3: "Find young hidden gems under 21"
+Output: {"action": "hidden_gems", "target_page": "Hidden Gems", "max_age": 21}
+
+Example 4: "Show me players similar to Bukayo Saka"
+Output: {"action": "find_similar", "target_page": "Player Search", "player_name": "Bukayo Saka"}
 """
 
 # ============================================================================
@@ -193,10 +218,23 @@ class AgenticScoutChat:
     def get_api_params(self, filters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Convert internal JSON filters to actual API parameter names.
+        Now includes navigation actions for page routing.
         """
         params = {}
         
-        # Direct mappings
+        # Navigation actions (NEW)
+        if 'action' in filters: 
+            params['action'] = filters['action']
+        if 'target_page' in filters: 
+            params['target_page'] = filters['target_page']
+        if 'metric' in filters: 
+            params['metric'] = filters['metric']
+        if 'player_name' in filters:
+            params['player_name'] = filters['player_name']
+        if 'compare_player' in filters:
+            params['compare_player'] = filters['compare_player']
+        
+        # Direct filter mappings
         if 'min_age' in filters: params['min_age'] = filters['min_age']
         if 'max_age' in filters: params['max_age'] = filters['max_age']
         if 'league' in filters: params['league'] = filters['league']
@@ -210,9 +248,6 @@ class AgenticScoutChat:
         
         # Dominance mapping (advanced)
         if 'min_dominance' in filters:
-            # We need to decide which metric this dominance applies to
-            # API doesn't have a generic "dominance" filter yet, 
-            # so we might implement logic in the frontend to filter the results dataframe
             params['min_dominance'] = filters['min_dominance']
             
         return params
