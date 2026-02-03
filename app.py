@@ -728,6 +728,121 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
             response_parts.append(f"Searching: {api_params['player_name']}")
         needs_rerun = True
     
+    elif action == 'squad_analysis':
+        # Set Squad Analysis page - pre-fill team search
+        if 'team_name' in api_params:
+            st.session_state.squad_search = api_params['team_name']
+            response_parts.append(f"Team: {api_params['team_name']}")
+        needs_rerun = True
+    
+    elif action == 'squad_planner':
+        # Set Squad Planner page - add players to squad
+        if 'squad_players' in api_params:
+            players = api_params['squad_players']
+            df = st.session_state.df_clustered
+            
+            # Clear existing squad and start fresh
+            st.session_state.shadow_squad = {
+                'GK': None, 'RB': None, 'LB': None, 'RCB': None, 'LCB': None,
+                'CDM': None, 'RCM': None, 'LCM': None,
+                'RW': None, 'ST': None, 'LW': None
+            }
+            
+            def get_best_slot(pos_string: str) -> str:
+                """Determine best slot from raw Pos column like 'DF,FB' or 'FW,RW'"""
+                if pd.isna(pos_string):
+                    return 'RCM'
+                pos_str = str(pos_string).upper()
+                
+                # Check for specific positions in the raw string
+                if 'GK' in pos_str:
+                    return 'GK'
+                if 'LB' in pos_str:
+                    return 'LB'
+                if 'RB' in pos_str or 'FB' in pos_str:
+                    return 'RB'
+                if 'CB' in pos_str:
+                    return 'RCB'
+                if 'LW' in pos_str:
+                    return 'LW'
+                if 'RW' in pos_str:
+                    return 'RW'
+                if 'DM' in pos_str:
+                    return 'CDM'
+                if 'AM' in pos_str or 'CM' in pos_str:
+                    return 'RCM'
+                if 'FW' in pos_str or 'ST' in pos_str:
+                    return 'ST'
+                if 'DF' in pos_str:
+                    return 'RCB'
+                if 'MF' in pos_str:
+                    return 'RCM'
+                return 'RCM'  # Default
+            
+            def normalize_for_match(name: str) -> str:
+                """Normalize player name for matching"""
+                return name.lower().replace('-', ' ').replace("'", "").strip()
+            
+            added_players = []
+            not_found = []
+            
+            for player_query in players:
+                # Normalize query
+                query_norm = normalize_for_match(player_query)
+                
+                # Try exact substring match first
+                matches = df[df['Player'].apply(normalize_for_match).str.contains(query_norm, regex=False)]
+                
+                if matches.empty:
+                    # Try partial word match
+                    query_words = query_norm.split()
+                    for word in query_words:
+                        if len(word) > 3:  # Skip short words
+                            matches = df[df['Player'].apply(normalize_for_match).str.contains(word, regex=False)]
+                            if not matches.empty:
+                                break
+                
+                if not matches.empty:
+                    player_row = matches.iloc[0]
+                    player_obj = player_row.to_dict()
+                    
+                    # Get position from raw Pos column
+                    raw_pos = player_row.get('Pos', player_row.get('Primary_Pos', 'MF'))
+                    slot = get_best_slot(raw_pos)
+                    
+                    # Find empty slot if preferred is taken
+                    if st.session_state.shadow_squad.get(slot) is not None:
+                        # Try to find alternative slot based on position group
+                        pos_alternatives = {
+                            'GK': ['GK'],
+                            'RB': ['RB', 'LB', 'RCB', 'LCB'],
+                            'LB': ['LB', 'RB', 'LCB', 'RCB'],
+                            'RCB': ['RCB', 'LCB', 'RB', 'LB'],
+                            'LCB': ['LCB', 'RCB', 'LB', 'RB'],
+                            'CDM': ['CDM', 'RCM', 'LCM'],
+                            'RCM': ['RCM', 'LCM', 'CDM'],
+                            'LCM': ['LCM', 'RCM', 'CDM'],
+                            'RW': ['RW', 'ST', 'LW'],
+                            'LW': ['LW', 'ST', 'RW'],
+                            'ST': ['ST', 'RW', 'LW']
+                        }
+                        alternatives = pos_alternatives.get(slot, list(st.session_state.shadow_squad.keys()))
+                        for alt_slot in alternatives:
+                            if st.session_state.shadow_squad.get(alt_slot) is None:
+                                slot = alt_slot
+                                break
+                    
+                    st.session_state.shadow_squad[slot] = player_obj
+                    added_players.append(f"{player_obj['Player']} -> {slot}")
+                else:
+                    not_found.append(player_query)
+            
+            if added_players:
+                response_parts.append(f"Added: {', '.join(added_players)}")
+            if not_found:
+                response_parts.append(f"Not found: {', '.join(not_found)}")
+        needs_rerun = True
+    
     # Also apply global filters (age, league, position for sidebar)
     if 'min_age' in api_params: 
         st.session_state.filters['age_min'] = api_params['min_age']
