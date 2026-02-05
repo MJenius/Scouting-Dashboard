@@ -677,6 +677,26 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
     response_parts = []
     needs_rerun = False
     
+    # Helper for exact choice matching (Leagues, Priorities, Positions)
+    def find_exact_choice(query: str, options: List[str]) -> str:
+        if not query: return None
+        query_lower = str(query).lower().strip()
+        for opt in options:
+            if query_lower == opt.lower() or query_lower in opt.lower():
+                return opt
+        return None
+
+    def find_best_match(query: str, options: List[str]) -> str:
+        """Find the best matching player option using substring matching."""
+        if not query: return None
+        query_lower = str(query).lower()
+        # First try exact substring match
+        for opt in options:
+            if query_lower in opt.lower():
+                return opt
+        # Fallback: return first option or None
+        return options[0] if options else None
+
     # Navigate to target page
     valid_pages = ['Leaderboards', 'Head-to-Head', 'Player Search', 'Hidden Gems', 'Squad Analysis', 'Squad Planner']
     if target_page and target_page in valid_pages:
@@ -688,11 +708,15 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
     if action == 'leaderboard':
         # Set Leaderboards page filters
         if 'league' in api_params:
-            st.session_state.leaderboard_league = api_params['league']
-            response_parts.append(f"League: {api_params['league']}")
+            matched = find_exact_choice(api_params['league'], LEAGUES)
+            if matched:
+                st.session_state.leaderboard_league = matched
+                response_parts.append(f"League: {matched}")
         if 'position' in api_params:
-            st.session_state.leaderboard_position = api_params['position']
-            response_parts.append(f"Position: {api_params['position']}")
+            matched = find_exact_choice(api_params['position'], PRIMARY_POSITIONS)
+            if matched:
+                st.session_state.leaderboard_position = matched
+                response_parts.append(f"Position: {matched}")
         if 'metric' in api_params:
             st.session_state.leaderboard_metric = api_params['metric']
             response_parts.append(f"Metric: {api_params['metric']}")
@@ -704,16 +728,6 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
         df = st.session_state.df_clustered
         player_options = [f"{row['Player']} ({row['Squad']})" for _, row in df.iterrows()]
         player_options = sorted(list(set(player_options)))
-        
-        def find_best_match(query: str, options: List[str]) -> str:
-            """Find the best matching player option using substring matching."""
-            query_lower = query.lower()
-            # First try exact substring match
-            for opt in options:
-                if query_lower in opt.lower():
-                    return opt
-            # Fallback: return first option or None
-            return options[0] if options else None
         
         if 'player_name' in api_params:
             matched = find_best_match(api_params['player_name'], player_options)
@@ -737,27 +751,12 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
     elif action in ['search', 'find_similar']:
         # Set Player Search or Hidden Gems page filters
         if target_page == 'Hidden Gems':
-            # Benchmark Mode on Hidden Gems Page
+            # Mode Selection
             st.session_state.gems_search_mode = "Benchmark (Player Match)"
             
             df = st.session_state.df_clustered
             player_options = [f"{row['Player']} ({row['Squad']})" for _, row in df.iterrows()]
             player_options = sorted(list(set(player_options)))
-            
-            def find_best_match(query: str, options: List[str]) -> str:
-                query_lower = query.lower()
-                for opt in options:
-                    if query_lower in opt.lower():
-                        return opt
-                return options[0] if options else None
-            
-            # Helper for exact choice matching (Leagues, Priorities)
-            def find_exact_choice(query: str, options: List[str]) -> str:
-                query_lower = query.lower()
-                for opt in options:
-                    if query_lower == opt.lower() or query_lower in opt.lower():
-                        return opt
-                return None
             
             if 'player_name' in api_params:
                 matched = find_best_match(api_params['player_name'], player_options)
@@ -902,12 +901,18 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
         needs_rerun = True
     
     # Also apply global filters (age, league, position for sidebar)
+    # Also apply global filters (age, league, position for sidebar)
     if 'min_age' in api_params: 
-        st.session_state.filters['age_min'] = api_params['min_age']
+        try: st.session_state.filters['age_min'] = int(api_params['min_age'])
+        except: pass
     if 'max_age' in api_params: 
-        st.session_state.filters['age_max'] = api_params['max_age']
+        try: st.session_state.filters['age_max'] = int(api_params['max_age'])
+        except: pass
+    
     if 'league' in api_params: 
-        st.session_state.filters['leagues'] = [api_params['league']]
+        matched = find_exact_choice(api_params['league'], LEAGUES)
+        if matched:
+            st.session_state.filters['leagues'] = [matched]
     
     if 'position' in api_params:
         pos = api_params['position']
@@ -916,8 +921,10 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
             st.session_state.filters['positions'] = ['CB', 'FB']
         elif pos == 'MF':
             st.session_state.filters['positions'] = ['DM', 'CM', 'AM']
-        elif pos in PRIMARY_POSITIONS:
-            st.session_state.filters['positions'] = [pos]
+        else:
+            matched = find_exact_choice(pos, PRIMARY_POSITIONS)
+            if matched:
+                st.session_state.filters['positions'] = [matched]
     
     return " | ".join(response_parts) if response_parts else "Filters updated", needs_rerun
 
