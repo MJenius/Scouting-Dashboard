@@ -14,6 +14,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from dotenv import load_dotenv
+from streamlit_option_menu import option_menu
 
 # Load environment variables from .env file
 load_dotenv()
@@ -100,7 +101,7 @@ if 'filters' not in st.session_state:
         'age_max': 35,
         'leagues': LEAGUES,
         'positions': PRIMARY_POSITIONS,
-        'min_90s': 0.5,
+        'min_90s': 5,
         'metrics': {}  # Dynamic metric filters (e.g., {'Gls/90': 0.5})
     }
 
@@ -124,7 +125,7 @@ if 'backend_available' not in st.session_state:
 @st.cache_data
 def load_all_data():
     """Load and process all data once per session."""
-    result = process_all_data('english_football_pyramid_master.csv', min_90s=0.5)
+    result = process_all_data('english_football_pyramid_master.csv', min_90s=0)
     df = result['dataframe']
     scaled = result['scaled_features']
     scalers = result['scalers']
@@ -155,8 +156,34 @@ def ensure_data_loaded():
 # ============================================================================
 
 with st.sidebar:
+    st.title("Scouting Dashboard")
+    
+    # Navigation Menu
+    menu_options = ['Player Search', 'Head-to-Head', 'Hidden Gems', 'Leaderboards', 'Squad Analysis', 'Squad Planner']
+    
+    # Get index of current page for manual_select (must be integer)
+    try:
+        current_page_index = menu_options.index(st.session_state.page)
+    except (ValueError, AttributeError):
+        current_page_index = 0
 
-    st.title("Filters & Settings")
+    selected_page = option_menu(
+        menu_title=None,
+        options=menu_options,
+        icons=['search', 'intersect', 'gem', 'trophy', 'bar-chart-line', 'clipboard-check'],
+        menu_icon="cast",
+        default_index=current_page_index,
+        manual_select=current_page_index,
+        key='sidebar_nav'
+    )
+    
+    # Update session state page immediately
+    if selected_page != st.session_state.page:
+        st.session_state.page = selected_page
+        st.rerun()
+
+    st.divider()
+    st.subheader("Filters & Settings")
     
     # Age filter
     st.subheader("Age Range")
@@ -190,14 +217,13 @@ with st.sidebar:
     )
     st.session_state.filters['positions'] = selected_positions
     
-    # Minutes filter
     st.subheader("Minimum Minutes Played")
     min_90s = st.slider(
         "Min 90s:",
-        min_value=0.0,
-        max_value=30.0,
-        value=float(st.session_state.filters['min_90s']),
-        step=0.5,
+        min_value=0,
+        max_value=30,
+        value=int(st.session_state.filters['min_90s']),
+        step=1,
         key='min_90s_slider'
     )
     st.session_state.filters['min_90s'] = min_90s
@@ -625,25 +651,12 @@ engine = st.session_state.engine
 # Apply filters
 df_filtered = apply_filters(df)
 
+# Apply filters
+df_filtered = apply_filters(df)
+
 # Header
 st.title("Football Scouting Dashboard")
 st.caption(f"Multi-League Global Scouting Dashboard | {len(df_filtered):,} players after filters")
-
-# Page selection
-col1, col2, col3, col4, col5, col6 = st.columns(6)
-pages = {
-    'Player Search': col1,
-    'Head-to-Head': col2,
-    'Hidden Gems': col3,
-    'Leaderboards': col4,
-    'Squad Analysis': col5,
-    'Squad Planner': col6,
-}
-
-for page_name, col in pages.items():
-    if col.button(page_name, key=f"page_{page_name}", use_container_width=True):
-        st.session_state.page = page_name
-
 st.divider()
 
 # ============================================================================
@@ -722,10 +735,55 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
         needs_rerun = True
     
     elif action in ['search', 'find_similar']:
-        # Set Player Search page filters
-        if 'player_name' in api_params:
-            st.session_state.player_search_query = api_params['player_name']
-            response_parts.append(f"Searching: {api_params['player_name']}")
+        # Set Player Search or Hidden Gems page filters
+        if target_page == 'Hidden Gems':
+            # Benchmark Mode on Hidden Gems Page
+            st.session_state.gems_search_mode = "Benchmark (Player Match)"
+            
+            df = st.session_state.df_clustered
+            player_options = [f"{row['Player']} ({row['Squad']})" for _, row in df.iterrows()]
+            player_options = sorted(list(set(player_options)))
+            
+            def find_best_match(query: str, options: List[str]) -> str:
+                query_lower = query.lower()
+                for opt in options:
+                    if query_lower in opt.lower():
+                        return opt
+                return options[0] if options else None
+            
+            # Helper for exact choice matching (Leagues, Priorities)
+            def find_exact_choice(query: str, options: List[str]) -> str:
+                query_lower = query.lower()
+                for opt in options:
+                    if query_lower == opt.lower() or query_lower in opt.lower():
+                        return opt
+                return None
+            
+            if 'player_name' in api_params:
+                matched = find_best_match(api_params['player_name'], player_options)
+                if matched:
+                    st.session_state.benchmark_player = matched
+                    response_parts.append(f"Benchmark: {matched}")
+            
+            # Normalize League
+            league_query = api_params.get('league') or api_params.get('target_league')
+            if league_query:
+                matched_league = find_exact_choice(league_query, LEAGUES)
+                if matched_league:
+                    st.session_state.benchmark_target_league = matched_league
+                    response_parts.append(f"Target League: {matched_league}")
+                
+            # Normalize Priority
+            if 'priority' in api_params:
+                matched_priority = find_exact_choice(api_params['priority'], list(SCOUTING_PRIORITIES.keys()))
+                if matched_priority:
+                    st.session_state.benchmark_priority = matched_priority
+                    response_parts.append(f"Priority: {matched_priority}")
+        else:
+            # Standard Player Search
+            if 'player_name' in api_params:
+                st.session_state.player_search_query = api_params['player_name']
+                response_parts.append(f"Searching: {api_params['player_name']}")
         needs_rerun = True
     
     elif action == 'squad_analysis':
@@ -870,47 +928,66 @@ with st.expander("Agentic Scout Chat", expanded=False):
     # Scrollable chat container with fixed height
     chat_container = st.container(height=300)
     
-    with chat_container:
+    # Function to display chat messages
+    def display_chat_messages():
         # Only show last 10 messages to keep UI clean
         messages_to_show = st.session_state.chat_messages[-10:] if len(st.session_state.chat_messages) > 10 else st.session_state.chat_messages
         for msg in messages_to_show:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
+
+    # Render current messages
+    with chat_container:
+        display_chat_messages()
     
     # Chat input (outside scrollable container)
     if prompt := st.chat_input("Ask the AI Scout..."):
-        # Add user message
+        # 1. Add user message and display immediately
         st.session_state.chat_messages.append({"role": "user", "content": prompt})
+        with chat_container:
+            with st.chat_message("user"):
+                st.markdown(prompt)
         
-        # Process with Agentic AI
-        chat_agent = AgenticScoutChat()
-        if chat_agent.available:
-            filters = chat_agent.parse_intent(prompt)
-            
-            if "error" in filters:
-                response_text = f"Error: {filters['error']}"
-                needs_rerun = False
-            else:
-                # Get API params with actions
-                api_params = chat_agent.get_api_params(filters)
-                
-                # Dispatch action (navigate + apply filters)
-                action_result, needs_rerun = dispatch_agentic_action(api_params)
-                
-                # Build response
-                response_text = f"**Action:** {action_result}\n\n"
-                response_text += "**Parsed Intent:**\n"
-                for k, v in filters.items():
-                    response_text += f"- `{k}`: {v}\n"
-        else:
-            response_text = "**Local AI is Offline.** Please start Ollama to use this feature."
-            needs_rerun = False
+        # 2. Show loading indicator while processing
+        with chat_container:
+            with st.chat_message("assistant"):
+                with st.status("Analyzing request...", expanded=True) as status:
+                    # Process with Agentic AI
+                    chat_agent = AgenticScoutChat()
+                    if chat_agent.available:
+                        st.write("Parsing intent...")
+                        filters = chat_agent.parse_intent(prompt)
+                        
+                        if "error" in filters:
+                            response_text = f"Error: {filters['error']}"
+                            needs_rerun = False
+                        else:
+                            st.write("Applying filters and navigation...")
+                            # Get API params with actions
+                            api_params = chat_agent.get_api_params(filters)
+                            
+                            # Dispatch action (navigate + apply filters)
+                            action_result, needs_rerun = dispatch_agentic_action(api_params)
+                            
+                            # Build response
+                            response_text = f"**Action:** {action_result}\n\n"
+                            response_text += "**Parsed Intent:**\n"
+                            for k, v in filters.items():
+                                response_text += f"- `{k}`: {v}\n"
+                        status.update(label="Analysis complete!", state="complete", expanded=False)
+                    else:
+                        response_text = "**Local AI is Offline.** Please start Ollama to use this feature."
+                        needs_rerun = False
+                        status.update(label="Ollama Offline", state="error")
         
+        # 3. Save response to session state
         st.session_state.chat_messages.append({"role": "assistant", "content": response_text})
         
-        # CRITICAL: Rerun to apply navigation/filter changes immediately
+        # 4. CRITICAL: Rerun to apply navigation/filter changes immediately
         if needs_rerun:
             st.rerun()
+        else:
+            st.rerun() # Refresh to clear the status box and show the persistent markdown message instead
 
 st.divider()
 
@@ -979,22 +1056,25 @@ if st.session_state.page == 'Player Search':
                     st.info("This can happen if the cache is out of sync. Please click **'Reset Cache & Reload Data'** in the sidebar.")
                     st.stop()
                 
-                # Player card
-                col1, col2, col3, col4, col5 = st.columns(5)
+                # Professional Player Card (Bio & Physicals)
+                with st.container(border=True):
+                    st.subheader(f"Player Profile: {player_data['Player']}")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Age", int(player_data['Age']))
+                        st.metric("League", player_data['League'])
+                    with col2:
+                        st.metric("Position", player_data['Primary_Pos'])
+                        st.metric("Squad", player_data['Squad'])
+                    with col3:
+                        st.metric("90s Played", f"{player_data['90s']:.1f}")
+                        archetype = player_data.get('Archetype', 'Unknown')
+                        st.metric("Archetype", archetype[:15])
                 
-                with col1:
-                    st.metric("Age", int(player_data['Age']))
-                with col2:
-                    st.metric("League", player_data['League'])
-                with col3:
-                    st.metric("Position", player_data['Primary_Pos'])
-                with col4:
-                    st.metric("90s", f"{player_data['90s']:.1f}")
-                with col5:
-                    archetype = player_data.get('Archetype', 'Unknown')
-                    st.metric("Archetype", archetype[:15])
-                
-                st.divider()
+                # Performance & Data Confidence Card
+                with st.container(border=True):
+                    st.subheader("Performance Context")
                 
                 # Completeness score with professional confidence labels
                 completeness = player_data['Completeness_Score']
@@ -1148,7 +1228,21 @@ if st.session_state.page == 'Player Search':
                     
                     if percentiles:
                         pct_df = PlotlyVisualizations.percentile_progress_bars(percentiles)
-                        st.dataframe(pct_df, use_container_width=True, hide_index=True)
+                        st.dataframe(
+                            pct_df, 
+                            use_container_width=True, 
+                            hide_index=True,
+                            column_config={
+                                "Metric": st.column_config.TextColumn("Key Metric", width="medium"),
+                                "Percentile": st.column_config.ProgressColumn(
+                                    "Percentile Rank",
+                                    help="Rank against same-position players",
+                                    format="%d%%",
+                                    min_value=0,
+                                    max_value=100,
+                                )
+                            }
+                        )
                     else:
                         st.info("Goalkeeper percentile data not available")
                 else:
@@ -1162,7 +1256,21 @@ if st.session_state.page == 'Player Search':
                             percentiles[feat] = player_data[pct_col]
                     
                     pct_df = PlotlyVisualizations.percentile_progress_bars(percentiles)
-                    st.dataframe(pct_df, use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        pct_df, 
+                        use_container_width=True, 
+                        hide_index=True,
+                        column_config={
+                            "Metric": st.column_config.TextColumn("Key Metric", width="medium"),
+                            "Percentile": st.column_config.ProgressColumn(
+                                "Percentile Rank",
+                                help="Rank against same-position players",
+                                format="%d%%",
+                                min_value=0,
+                                max_value=100,
+                            )
+                        }
+                    )
                 
                 
                 st.divider()
@@ -1817,6 +1925,7 @@ elif st.session_state.page == 'Hidden Gems':
     search_mode = st.radio(
         "Search Mode:",
         ["Discovery (Filters)", "Benchmark (Player Match)"], 
+        key='gems_search_mode',
         horizontal=True,
         help="Choose between filtering by metrics or finding players similar to a benchmark player."
     )
@@ -1919,7 +2028,13 @@ elif st.session_state.page == 'Hidden Gems':
             st.dataframe(
                 filtered_gems[cols].head(50), 
                 use_container_width=True, 
-                hide_index=True
+                hide_index=True,
+                column_config={
+                    "Player": st.column_config.TextColumn("Player", pinned=True),
+                    "Finishing_Efficiency": st.column_config.NumberColumn("Finishing Eff.", format="%+.2f"),
+                    "Creative_Efficiency": st.column_config.NumberColumn("Creative Eff.", format="%+.2f"),
+                    "Gls/90": st.column_config.ProgressColumn("Goals/90 (Scaled)", min_value=0, max_value=1, format="%.2f"),
+                }
             )
             
             # Export
@@ -1943,10 +2058,14 @@ elif st.session_state.page == 'Hidden Gems':
             player_options = [f"{row['Player']} ({row['Squad']})" for _, row in df.iterrows()]
             player_options = sorted(list(set(player_options))) 
             
+            # Find index for session state value to ensure UI sync
+            curr_bench = st.session_state.get('benchmark_player')
+            bench_idx = player_options.index(curr_bench) if curr_bench in player_options else None
+            
             benchmark_player_entry = st.selectbox(
                 "Benchmark Player (The Ideal):",
                 options=player_options,
-                index=None,
+                index=bench_idx,
                 placeholder="e.g. Bukayo Saka",
                 key='benchmark_player'
             )
@@ -1954,16 +2073,25 @@ elif st.session_state.page == 'Hidden Gems':
             benchmark_name = benchmark_player_entry.split(" (")[0] if benchmark_player_entry else None
         
         with col2:
+            curr_league = st.session_state.get('benchmark_target_league', 'Championship')
+            league_idx = LEAGUES.index(curr_league) if curr_league in LEAGUES else 0
+            
             target_league = st.selectbox(
                 "Target League:",
                 options=LEAGUES,
+                index=league_idx,
                 key='benchmark_target_league'
             )
             
         with col3:
+            curr_priority = st.session_state.get('benchmark_priority', 'Standard')
+            priority_options = list(SCOUTING_PRIORITIES.keys())
+            priority_idx = priority_options.index(curr_priority) if curr_priority in priority_options else 0
+            
             priority = st.selectbox(
                 "Metric Priority:",
-                options=list(SCOUTING_PRIORITIES.keys()),
+                options=priority_options,
+                index=priority_idx,
                 key='benchmark_priority'
             )
             
@@ -2136,7 +2264,19 @@ elif st.session_state.page == 'Leaderboards':
     st.dataframe(
         board_df[display_cols].head(25),
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        column_config={
+            "Player": st.column_config.TextColumn("Player", pinned=True),
+            metric: st.column_config.NumberColumn(metric, format="%.2f"),
+            f'{metric}_pct': st.column_config.ProgressColumn(
+                "Percentile",
+                help=f"Rank for {metric}",
+                min_value=0,
+                max_value=100,
+                format="%d%%"
+            ),
+            "Archetype": st.column_config.TextColumn("Archetype", width="small")
+        }
     )
     
     

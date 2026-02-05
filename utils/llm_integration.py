@@ -71,24 +71,14 @@ AVAILABLE SCHEMA (Use only these keys):
 {
     "action": str (REQUIRED: "leaderboard" | "compare" | "search" | "find_similar" | "hidden_gems" | "squad_analysis" | "squad_planner"),
     "target_page": str (Auto-mapped from action: "Leaderboards" | "Head-to-Head" | "Player Search" | "Hidden Gems" | "Squad Analysis" | "Squad Planner"),
-    "metric": str (For leaderboards: "Gls/90", "Ast/90", "xG90", "xA90", "Sh/90", "SoT/90", "TklW/90", "Int/90"),
-    "player_name": str (For search/compare - the main player),
-    "compare_player": str (For compare - the second player),
-    "team_name": str (For squad_analysis - the team/club name),
-    "squad_players": list[str] (For squad_planner - list of player names),
-    "min_age": int,
-    "max_age": int,
-    "league": str (Exact match: "Premier League", "Championship", "League One", "League Two", "National League", "Bundesliga", "La Liga", "Serie A", "Ligue 1"),
-    "position": str (Exact match: "FW", "MF", "DF", "GK"),
-    "min_goals": float,
-    "min_assists": float,
-    "min_dominance": float (Z-score: 1.0 = good, 2.0 = elite)
+    "priority": str (For benchmark find_similar: "Standard", "Attacker", "Midfielder", "Defender", "High Ceiling", "Data Rich"),
+    "target_league": str (Alternative for 'league', ensures matching in Hidden Gems)
 }
 
 ACTION ROUTING RULES:
 - "best X" / "top scorers" / "leaders" / "ranking"           -> {"action": "leaderboard", "target_page": "Leaderboards"}
 - "compare X with Y" / "X vs Y"                               -> {"action": "compare", "target_page": "Head-to-Head"}
-- "find players like X" / "similar to X"                      -> {"action": "find_similar", "target_page": "Player Search"}
+- "find players like X" / "similar to X" / "next X"           -> {"action": "find_similar", "target_page": "Hidden Gems" if "next" in query or "Hidden Gems" in query else "Player Search"}
 - "hidden gems" / "undervalued" / "underrated" / "bargain"    -> {"action": "hidden_gems", "target_page": "Hidden Gems"}
 - "search for X" / "find X" / "show me X" (specific player)   -> {"action": "search", "target_page": "Player Search"}
 - "squad analysis of X" / "analyze X team"                    -> {"action": "squad_analysis", "target_page": "Squad Analysis"}
@@ -101,6 +91,12 @@ METRIC INFERENCE RULES:
 - "interceptor", "defensive mid"             -> metric: "Int/90"
 - "tackler", "ball winner"                   -> metric: "TklW/90"
 - "crosser", "winger"                        -> metric: "Crs/90"
+
+PRIORITY MAPPING RULES:
+- "offensive" / "shooting" -> priority: "Attacker"
+- "passing" / "midfield" -> priority: "Midfielder"
+- "defensive" / "tackling" -> priority: "Defender"
+- "potential" / "ceiling" -> priority: "High Ceiling"
 
 AGE MAPPING RULES:
 - "Young" -> {"max_age": 23}
@@ -122,8 +118,8 @@ Output: {"action": "compare", "target_page": "Head-to-Head", "player_name": "Haa
 Example 3: "Find young hidden gems under 21"
 Output: {"action": "hidden_gems", "target_page": "Hidden Gems", "max_age": 21}
 
-Example 4: "Show me players similar to Bukayo Saka"
-Output: {"action": "find_similar", "target_page": "Player Search", "player_name": "Bukayo Saka"}
+Example 4: "Find the next Robert Lewandowski in Championship with offensive priority"
+Output: {"action": "find_similar", "target_page": "Hidden Gems", "player_name": "Robert Lewandowski", "league": "Championship", "priority": "Attacker"}
 
 Example 5: "Give me a squad analysis of Birmingham City"
 Output: {"action": "squad_analysis", "target_page": "Squad Analysis", "team_name": "Birmingham City"}
@@ -265,6 +261,12 @@ class AgenticScoutChat:
         # Dominance mapping (advanced)
         if 'min_dominance' in filters:
             params['min_dominance'] = filters['min_dominance']
+        
+        # Benchmark specific
+        if 'priority' in filters:
+            params['priority'] = filters['priority']
+        if 'target_league' in filters:
+            params['target_league'] = filters['target_league']
             
         return params
 

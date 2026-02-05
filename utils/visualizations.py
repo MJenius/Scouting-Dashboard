@@ -22,6 +22,24 @@ class PlotlyVisualizations:
     """Reusable Plotly chart components for Streamlit."""
     
     @staticmethod
+    def _apply_dark_theme(fig: go.Figure, title: str = "", height: int = 500) -> go.Figure:
+        """Apply consistent dark mode theme with transparent backgrounds."""
+        fig.update_layout(
+            title=dict(
+                text=title,
+                x=0.5,
+                font=dict(size=18, color='white')
+            ),
+            template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='white', size=12),
+            height=height,
+            margin=dict(l=40, r=40, t=60, b=40),
+        )
+        return fig
+
+    @staticmethod
     def beeswarm_by_metric(
         df: pd.DataFrame,
         metric: str,
@@ -107,15 +125,12 @@ class PlotlyVisualizations:
                 ))
         
         # Layout
-        fig.update_layout(
-            title=f'{metric} Distribution - {league if league != "all" else "All Leagues"}',
-            xaxis=dict(showticklabels=False),
-            yaxis_title=metric,
-            height=height,
-            hovermode='closest',
-            showlegend=False,
-            template='plotly_dark',
+        PlotlyVisualizations._apply_dark_theme(
+            fig, 
+            title=f'{RADAR_LABELS.get(metric, metric)} Distribution - {league if league != "all" else "All Leagues"}',
+            height=height
         )
+        fig.update_layout(xaxis=dict(showticklabels=False), yaxis_title=metric, showlegend=False)
         
         return fig
     
@@ -189,14 +204,16 @@ class PlotlyVisualizations:
                 ))
         
         title_suffix = f' ({position})' if position else ''
+        PlotlyVisualizations._apply_dark_theme(
+            fig,
+            title=f'{RADAR_LABELS.get(metric, metric)} by Age{title_suffix}',
+            height=height
+        )
         fig.update_layout(
-            title=f'{metric} by Age{title_suffix}',
             xaxis_title='Age',
-            yaxis_title=metric,
-            height=height,
+            yaxis_title=RADAR_LABELS.get(metric, metric),
             hovermode='x unified',
-            template='plotly_dark',
-            legend=dict(x=0.01, y=0.99),
+            legend=dict(x=0.01, y=0.99, bgcolor='rgba(0,0,0,0)'),
         )
         
         return fig
@@ -278,10 +295,10 @@ class PlotlyVisualizations:
             hovertemplate='<b>%{label}</b><br>Count: %{value}<extra></extra>',
         )])
         
-        fig.update_layout(
+        PlotlyVisualizations._apply_dark_theme(
+            fig,
             title=f'Archetype Distribution - {league if league != "all" else "All Leagues"}',
-            height=height,
-            template='plotly_dark',
+            height=height
         )
         
         return fig
@@ -313,13 +330,12 @@ class PlotlyVisualizations:
                 hovertemplate='Position: ' + pos + '<br>' + metric + ': %{y:.2f}<extra></extra>',
             ))
         
-        fig.update_layout(
-            title=f'{metric} Distribution by Position',
-            yaxis_title=metric,
-            height=height,
-            template='plotly_dark',
-            showlegend=False,
+        PlotlyVisualizations._apply_dark_theme(
+            fig,
+            title=f'{RADAR_LABELS.get(metric, metric)} Distribution by Position',
+            height=height
         )
+        fig.update_layout(yaxis_title=RADAR_LABELS.get(metric, metric), showlegend=False)
         
         return fig
     
@@ -351,12 +367,12 @@ class PlotlyVisualizations:
                 hovertemplate='<b>' + league + '</b><br>' + metric + ': %{y:.2f}<extra></extra>',
             ))
         
-        fig.update_layout(
-            title=f'{metric} Distribution by League',
-            yaxis_title=metric,
-            height=height,
-            template='plotly_dark',
+        PlotlyVisualizations._apply_dark_theme(
+            fig,
+            title=f'{RADAR_LABELS.get(metric, metric)} Distribution by League',
+            height=height
         )
+        fig.update_layout(yaxis_title=RADAR_LABELS.get(metric, metric))
         
         return fig
     
@@ -394,13 +410,15 @@ class PlotlyVisualizations:
                     y=values,
                 ))
         
-        fig.update_layout(
+        PlotlyVisualizations._apply_dark_theme(
+            fig,
             title='Player Comparison',
+            height=height
+        )
+        fig.update_layout(
             barmode='group',
             xaxis_title='Metrics',
             yaxis_title='Per-90 Value',
-            height=height,
-            template='plotly_dark',
             hovermode='x unified',
         )
         
@@ -444,12 +462,14 @@ class PlotlyVisualizations:
         fig.add_vline(x=mean_pct, line_dash='dash', annotation_text=f'Mean: {mean_pct:.0f}%')
         
         metric_name = percentile_column.replace('_pct', '')
+        PlotlyVisualizations._apply_dark_theme(
+            fig,
+            title=f'{RADAR_LABELS.get(metric_name, metric_name)} Percentile Distribution - {league if league != "all" else "All Leagues"}',
+            height=height
+        )
         fig.update_layout(
-            title=f'{metric_name} Percentile Distribution - {league if league != "all" else "All Leagues"}',
             xaxis_title='Percentile Rank',
             yaxis_title='Player Count',
-            height=height,
-            template='plotly_dark',
             showlegend=False,
         )
         
@@ -537,8 +557,13 @@ class PlotlyVisualizations:
                          'Archetype: %{customdata[7]}<extra></extra>',
         )
         
+        PlotlyVisualizations._apply_dark_theme(
+            fig,
+            title='Archetype Universe: Player Style Map (PCA-2D Projection)',
+            height=height
+        )
+        
         fig.update_layout(
-            template='plotly_dark',
             hovermode='closest',
             xaxis_title='Playing Style Axis 1 (<- to ->)',
             yaxis_title='Playing Style Axis 2 (<- to ->)',
@@ -558,9 +583,6 @@ class PlotlyVisualizations:
                 zerolinewidth=1,
                 zerolinecolor='rgba(255, 255, 255, 0.3)',
             ),
-            plot_bgcolor='#1a1a1a',
-            paper_bgcolor='#1a1a1a',
-            font=dict(color='white'),
             legend=dict(
                 yanchor='top',
                 y=0.99,
@@ -676,17 +698,16 @@ class PlotlyVisualizations:
                         customdata=arch_df[['Player', 'Squad', 'League', 'Primary_Pos']],
                     ))
         
-        fig.update_layout(
+        PlotlyVisualizations._apply_dark_theme(
+            fig,
             title='Archetype Universe: Filtered Player Distribution',
-            template='plotly_dark',
+            height=height
+        )
+        
+        fig.update_layout(
             xaxis_title='Playing Style Axis 1',
             yaxis_title='Playing Style Axis 2',
-            height=height,
-            width=width,
             hovermode='closest',
-            plot_bgcolor='#1a1a1a',
-            paper_bgcolor='#1a1a1a',
-            font=dict(color='white'),
             legend=dict(
                 yanchor='top',
                 y=0.99,
@@ -755,7 +776,81 @@ class PlotlyVisualizations:
         )
         
         fig.update_traces(marker=dict(size=15, line=dict(width=2, color='white')))
-        fig.update_layout(template='plotly_dark')
+        PlotlyVisualizations._apply_dark_theme(fig, title='Archetype Idealized Centroids', height=height)
+        return fig
+
+    @staticmethod
+    def player_radar_chart(
+        target_stats: Dict[str, float],
+        comparison_stats: Optional[Dict[str, float]] = None,
+        target_name: str = "Target Player",
+        comparison_name: str = "Comparison Player",
+        use_percentiles: bool = False,
+        is_goalkeeper: bool = False,
+        height: int = 600,
+    ) -> go.Figure:
+        """
+        Refactored global Radar Chart component.
+        Consolidates logic from similarity.py and app.py.
+        """
+        from .constants import FEATURE_COLUMNS, GK_FEATURE_COLUMNS, RADAR_LABELS, LEAGUE_COLORS
+        
+        feature_list = GK_FEATURE_COLUMNS if is_goalkeeper else FEATURE_COLUMNS
+        categories = [RADAR_LABELS.get(feat, feat) for feat in feature_list]
+        
+        # Close the circle for radar charts
+        categories_closed = categories + [categories[0]]
+        
+        fig = go.Figure()
+
+        # Target trace
+        target_values = [target_stats.get(feat, 0) for feat in feature_list]
+        target_values_closed = target_values + [target_values[0]]
+        
+        fig.add_trace(go.Scatterpolar(
+            r=target_values_closed,
+            theta=categories_closed,
+            fill='toself',
+            name=target_name,
+            line=dict(color='#00d1ff', width=2),
+            fillcolor='rgba(0, 209, 255, 0.25)',
+        ))
+
+        if comparison_stats:
+            comp_values = [comparison_stats.get(feat, 0) for feat in feature_list]
+            comp_values_closed = comp_values + [comp_values[0]]
+            
+            fig.add_trace(go.Scatterpolar(
+                r=comp_values_closed,
+                theta=categories_closed,
+                fill='toself',
+                name=comparison_name,
+                line=dict(color='#ff4b4b', width=2),
+                fillcolor='rgba(255, 75, 75, 0.25)',
+            ))
+
+        PlotlyVisualizations._apply_dark_theme(fig, title="", height=height)
+        
+        fig.update_layout(
+            polar=dict(
+                bgcolor='rgba(0,0,0,0)',
+                angularaxis=dict(
+                    tickfont=dict(size=14, color='white'),  # Larger font for labels
+                    gridcolor='rgba(255, 255, 255, 0.1)',
+                    linecolor='rgba(255, 255, 255, 0.2)',
+                ),
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 100] if use_percentiles else None,
+                    gridcolor='rgba(255, 255, 255, 0.1)',
+                    linecolor='rgba(255, 255, 255, 0.2)',
+                    tickfont=dict(size=10),
+                    showgrid=False, # Remove grid lines as requested
+                )
+            ),
+            legend=dict(x=0.8, y=1.1, bgcolor='rgba(0,0,0,0)'),
+        )
+        
         return fig
 
 
@@ -812,15 +907,14 @@ def create_similarity_driver_chart(feature_attribution: Dict[str, float]) -> go.
         )
     ])
     
-    fig.update_layout(
+    PlotlyVisualizations._apply_dark_theme(
+        fig,
         title='Similarity Driver Analysis (How Similar are They?)',
+        height=height
+    )
+    fig.update_layout(
         xaxis_title='Similarity Score',
         yaxis_title='Feature',
-        height=400,
-        template='plotly_dark',
-        plot_bgcolor='#1a1a1a',
-        paper_bgcolor='#1a1a1a',
-        font=dict(color='white'),
         xaxis=dict(range=[0, 1]),
     )
     

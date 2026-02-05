@@ -92,82 +92,17 @@ class RadarChartGenerator:
         is_goalkeeper: bool = False,
     ) -> 'go.Figure':
         """
-        Generate interactive Plotly radar chart.
-        
-        Args:
-            target_stats: Dict of feature -> value for target player
-            comparison_stats: Dict of feature -> value for comparison (optional)
-            target_name: Name of target player
-            comparison_name: Name of comparison player
-            use_percentiles: Use percentile values (0-100) vs raw stats
-            save_path: Optional path to save HTML version
-            is_goalkeeper: Use goalkeeper-specific metrics instead of outfield metrics
-            
-        Returns:
-            Plotly Figure object (can be rendered with st.plotly_chart)
+        Generate interactive Plotly radar chart using the centralized component.
         """
-        try:
-            import plotly.graph_objects as go
-        except ImportError:
-            raise ImportError("Plotly required for radar charts: pip install plotly")
-        
-        # Select features based on position
-        if is_goalkeeper:
-            feature_list = GK_FEATURE_COLUMNS
-        else:
-            feature_list = FEATURE_COLUMNS
-        
-        labels = self.labels
-        
-        # Prepare data
-        categories = [labels.get(feat, feat) for feat in feature_list]
-        target_values = [target_stats.get(feat, 0) for feat in feature_list]
-        
-        # Create figure
-        fig = go.Figure()
-        
-        # Add target trace
-        fig.add_trace(go.Scatterpolar(
-            r=target_values,
-            theta=categories,
-            fill='toself',
-            name=target_name,
-            line=dict(color='#003399'),  # Dark Blue
-            fillcolor='rgba(0, 51, 153, 0.3)',
-        ))
-        
-        # Add comparison trace if provided
-        if comparison_stats is not None:
-            comparison_values = [comparison_stats.get(feat, 0) for feat in feature_list]
-            fig.add_trace(go.Scatterpolar(
-                r=comparison_values,
-                theta=categories,
-                fill='toself',
-                name=comparison_name,
-                line=dict(color='#EE1939'),  # Red
-                fillcolor='rgba(238, 25, 57, 0.3)',
-            ))
-        
-        # Update layout
-        stat_type = "Percentile Ranks (%)" if use_percentiles else "Per-90 Stats"
-        fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, 100] if use_percentiles else None,
-                ),
-            ),
-            title=dict(
-                text=f"Player Comparison: {target_name}",
-                font=dict(size=16, color='#2C3E50'),
-            ),
-            hovermode='closest',
-            font=dict(size=11),
-            showlegend=True,
-            legend=dict(x=1.1, y=1),
+        from .visualizations import PlotlyVisualizations
+        return PlotlyVisualizations.player_radar_chart(
+            target_stats=target_stats,
+            comparison_stats=comparison_stats,
+            target_name=target_name,
+            comparison_name=comparison_name,
+            use_percentiles=use_percentiles,
+            is_goalkeeper=is_goalkeeper
         )
-        
-        return fig
     
     def generate_matplotlib_radar(
         self,
