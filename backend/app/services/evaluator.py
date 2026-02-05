@@ -324,8 +324,8 @@ class ModelEvaluator:
         
         # Train Random Forest
         self.model = RandomForestRegressor(
-            n_estimators=100,
-            max_depth=10,
+            n_estimators=40,
+            max_depth=6,
             min_samples_split=5,
             min_samples_leaf=2,
             random_state=random_state,

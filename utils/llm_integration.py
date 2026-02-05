@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
-DEFAULT_MODEL = "llama3"
+DEFAULT_MODEL = "llama3.2"
 
 # Strict mapping: Natural language terms → Database stat keys
 STAT_KEY_MAPPING = {
