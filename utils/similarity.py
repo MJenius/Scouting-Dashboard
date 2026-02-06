@@ -21,6 +21,7 @@ from typing import Tuple, List, Optional, Dict
 from dataclasses import dataclass
 from enum import Enum
 import warnings
+import unicodedata
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics.pairwise import cosine_similarity
@@ -200,6 +201,39 @@ class SimilarityEngine:
     
     FUZZY_MATCH_THRESHOLD = 75  # Lower threshold to catch more variations (accents, typos)
     
+    @staticmethod
+    def normalize_name(name: str) -> str:
+        """
+        Normalize player name by removing accents and converting to lowercase.
+        Handles both decomposable accents (like é) and special characters (like Ø, Æ).
+        """
+        if not isinstance(name, str):
+            return ""
+        
+        # Manual mapping for non-decomposable characters common in football
+        special_map = {
+            'Ø': 'O', 'ø': 'o',
+            'Æ': 'AE', 'æ': 'ae',
+            'Å': 'A', 'å': 'a',
+            'ẞ': 'SS', 'ß': 'ss',
+            'Ð': 'D', 'ð': 'd',
+            'Þ': 'TH', 'þ': 'th',
+            'Ĳ': 'IJ', 'ĳ': 'ij',
+            'Ł': 'L', 'ł': 'l',
+            'Ń': 'N', 'ń': 'n',
+            'Œ': 'OE', 'œ': 'oe',
+            'Š': 'S', 'š': 's',
+            'Ÿ': 'Y', 'ÿ': 'y',
+            'Ž': 'Z', 'ž': 'z',
+        }
+        for char, replacement in special_map.items():
+            name = name.replace(char, replacement)
+            
+        # Normalize to decomposed form
+        nfkd_form = unicodedata.normalize('NFKD', name)
+        # Filter out non-spacing mark characters (accents)
+        return "".join([c for c in nfkd_form if not unicodedata.combining(c)]).lower().strip()
+    
     def __init__(
         self,
         df: pd.DataFrame,
@@ -250,19 +284,25 @@ class SimilarityEngine:
                 pass
 
         # 2. Exact match (case-insensitive)
-        exact_match = self.df[self.df['Player'].str.casefold() == player_name.casefold()]
+        player_norm = self.normalize_name(player_name)
+        
+        # Check for exact normalized names in the dataset
+        # We cache or pre-calculate these for better performance if needed, 
+        # but for now, we'll do it on the fly as the dataset is typically < 10k players.
+        normalized_players = self.df['Player'].apply(self.normalize_name)
+        exact_match = self.df[normalized_players == player_norm]
         if len(exact_match) > 0:
             return exact_match.index[0]
 
         # 3. Exact substring match (case-insensitive)
         substring = self.df[
-            self.df['Player'].str.contains(player_name, case=False, na=False)
+            normalized_players.str.contains(player_norm, case=False, na=False, regex=False)
         ]
         if len(substring) > 0:
             # Prioritize matches that START with the string or are shorter/more exact
             substring = substring.assign(
                 len=substring['Player'].str.len(),
-                starts=substring['Player'].str.lower().str.startswith(player_name.lower())
+                starts=normalized_players.str.startswith(player_norm)
             ).sort_values(['starts', 'len'], ascending=[False, True])
             return substring.index[0]
         
@@ -275,7 +315,8 @@ class SimilarityEngine:
         for idx, player in search_space['Player'].items():
             if pd.isna(player):
                 continue
-            score = fuzz.ratio(player_name.lower(), player.lower())
+            # Compare normalized names for fuzzy matching to improve accuracy with accents
+            score = fuzz.ratio(player_norm, self.normalize_name(player))
             if score > best_score and score >= self.FUZZY_MATCH_THRESHOLD:
                 best_score = score
                 best_match = idx
@@ -302,17 +343,21 @@ class SimilarityEngine:
             candidates = self.df
         
         # We want to search in both Name and Squad
+        input_norm = self.normalize_name(input_text)
+        
         results = []
         for idx, row in candidates.iterrows():
             name = row['Player']
             squad = row['Squad']
             if pd.isna(name): continue
             
+            name_norm = self.normalize_name(name)
+            
             # Use token_set_ratio for better substring matching in names
-            score = fuzz.token_set_ratio(input_text.lower(), name.lower())
+            score = fuzz.token_set_ratio(input_norm, name_norm)
             
             # Bonus for starting with the input
-            if name.lower().startswith(input_text.lower()):
+            if name_norm.startswith(input_norm):
                 score += 20
                 
             if score >= 60: # Threshold for suggestions

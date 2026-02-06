@@ -14,6 +14,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from dotenv import load_dotenv
+import unicodedata
 from streamlit_option_menu import option_menu
 
 # Load environment variables from .env file
@@ -181,6 +182,38 @@ with st.sidebar:
     if selected_page != st.session_state.page:
         st.session_state.page = selected_page
         st.rerun()
+
+def normalize_name(name: str) -> str:
+    """
+    Standardize player/squad names by removing accents and special characters (like Ø, Æ).
+    """
+    if not isinstance(name, str):
+        return ""
+    
+    # Manual mapping for non-decomposable characters common in football
+    special_map = {
+        'Ø': 'O', 'ø': 'o',
+        'Æ': 'AE', 'æ': 'ae',
+        'Å': 'A', 'å': 'a',
+        'ẞ': 'SS', 'ß': 'ss',
+        'Ð': 'D', 'ð': 'd',
+        'Þ': 'TH', 'þ': 'th',
+        'Ĳ': 'IJ', 'ĳ': 'ij',
+        'Ł': 'L', 'ł': 'l',
+        'Ń': 'N', 'ń': 'n',
+        'Œ': 'OE', 'œ': 'oe',
+        'Š': 'S', 'š': 's',
+        'Ÿ': 'Y', 'ÿ': 'y',
+        'Ž': 'Z', 'ž': 'z',
+    }
+    for char, replacement in special_map.items():
+        name = name.replace(char, replacement)
+        
+    # Normalize to decomposed form
+    nfkd_form = unicodedata.normalize('NFKD', name)
+    # Filter out non-spacing mark characters (accents)
+    plain_text = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+    return plain_text.casefold().replace('-', ' ').replace("'", "").strip()
 
     st.divider()
     st.subheader("Filters & Settings")
@@ -680,22 +713,41 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
     # Helper for exact choice matching (Leagues, Priorities, Positions)
     def find_exact_choice(query: str, options: List[str]) -> str:
         if not query: return None
-        query_lower = str(query).lower().strip()
+        query_norm = normalize_name(query)
         for opt in options:
-            if query_lower == opt.lower() or query_lower in opt.lower():
+            opt_norm = normalize_name(opt)
+            if query_norm == opt_norm or query_norm in opt_norm:
                 return opt
         return None
 
     def find_best_match(query: str, options: List[str]) -> str:
-        """Find the best matching player option using substring matching."""
+        """Find the best matching player option using substring matching and priority scoring."""
         if not query: return None
-        query_lower = str(query).lower()
-        # First try exact substring match
+        query_norm = normalize_name(query)
+        
+        matches = []
         for opt in options:
-            if query_lower in opt.lower():
-                return opt
-        # Fallback: return first option or None
-        return options[0] if options else None
+            opt_name = opt.split(' (')[0]
+            opt_norm = normalize_name(opt_name)
+            
+            if query_norm == opt_norm:
+                return opt # Exact match found
+            
+            if opt_norm.startswith(query_norm):
+                # Penalty based on how much longer the name is than the query
+                score = 1 + (len(opt_norm) - len(query_norm)) * 0.1
+                matches.append((opt, score))
+            elif query_norm in opt_norm:
+                # Higher score (lower priority) for substring matches
+                score = 5 + (len(opt_norm) - len(query_norm)) * 0.1
+                matches.append((opt, score))
+        
+        if matches:
+            # Return the match with the lowest score (highest priority)
+            matches.sort(key=lambda x: x[1])
+            return matches[0][0]
+            
+        return None
 
     # Navigate to target page
     valid_pages = ['Leaderboards', 'Head-to-Head', 'Player Search', 'Hidden Gems', 'Squad Analysis', 'Squad Planner']
@@ -837,8 +889,8 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
                 return 'RCM'  # Default
             
             def normalize_for_match(name: str) -> str:
-                """Normalize player name for matching"""
-                return name.lower().replace('-', ' ').replace("'", "").strip()
+                """Normalize player name for matching by removing accents and converting to lowercase."""
+                return normalize_name(name)
             
             added_players = []
             not_found = []
@@ -1747,21 +1799,43 @@ elif st.session_state.page == 'Head-to-Head':
     
     col1, col2 = st.columns(2)
     
+    # We use a search + selectbox pattern to allow accent-insensitive and fuzzy matching
     with col1:
-        # Create unique display names for the selectbox
-        player_options = [f"{row['Player']} ({row['Squad']})" for _, row in df.iterrows()]
-        player_options = sorted(list(set(player_options)))  # Unique and sorted
+        p1_search = st.text_input("Search first player:", placeholder="e.g. 'Odegaard'", key='p1_search_box')
+        
+        # Get suggestions from engine (handles normalization/accents)
+        p1_suggestions = engine.get_player_suggestions(p1_search or "", limit=20)
+        p1_options = [s[0] for s in p1_suggestions]
+        
+        # If no search or no results, show a few top players or current selection
+        if not p1_options:
+            if 'player1_select' in st.session_state:
+                p1_options = [st.session_state.player1_select]
+            else:
+                p1_options = ["Search to see players..."]
 
         player1 = st.selectbox(
             "Select first player:",
-            options=player_options,
+            options=p1_options,
             key='player1_select'
         )
     
     with col2:
+        p2_search = st.text_input("Search second player:", placeholder="e.g. 'Mbappe'", key='p2_search_box')
+        
+        # Get suggestions from engine
+        p2_suggestions = engine.get_player_suggestions(p2_search or "", limit=20)
+        p2_options = [s[0] for s in p2_suggestions]
+        
+        if not p2_options:
+            if 'player2_select' in st.session_state:
+                p2_options = [st.session_state.player2_select]
+            else:
+                p2_options = ["Search to see players..."]
+
         player2 = st.selectbox(
             "Select second player:",
-            options=player_options,
+            options=p2_options,
             key='player2_select'
         )
     
@@ -2061,23 +2135,25 @@ elif st.session_state.page == 'Hidden Gems':
         
         with col1:
             # Benchmark Player Selector
-            # Use 'Player (Squad)' format for uniqueness
-            player_options = [f"{row['Player']} ({row['Squad']})" for _, row in df.iterrows()]
-            player_options = sorted(list(set(player_options))) 
+            gems_bench_search = st.text_input("Search benchmark player:", placeholder="e.g. 'Odegaard'", key='gems_bench_search')
             
-            # Find index for session state value to ensure UI sync
-            curr_bench = st.session_state.get('benchmark_player')
-            bench_idx = player_options.index(curr_bench) if curr_bench in player_options else None
+            bench_suggestions = engine.get_player_suggestions(gems_bench_search or "", limit=10)
+            bench_options = [s[0] for s in bench_suggestions]
             
+            if not bench_options:
+                curr_bench = st.session_state.get('benchmark_player')
+                if curr_bench:
+                    bench_options = [curr_bench]
+                else:
+                    bench_options = ["Search to see players..."]
+
             benchmark_player_entry = st.selectbox(
-                "Benchmark Player (The Ideal):",
-                options=player_options,
-                index=bench_idx,
-                placeholder="e.g. Bukayo Saka",
+                "Select benchmark:",
+                options=bench_options,
                 key='benchmark_player'
             )
             
-            benchmark_name = benchmark_player_entry.split(" (")[0] if benchmark_player_entry else None
+            benchmark_name = benchmark_player_entry.split(" (")[0] if benchmark_player_entry and " (" in benchmark_player_entry else None
         
         with col2:
             curr_league = st.session_state.get('benchmark_target_league', 'Championship')
@@ -2642,8 +2718,9 @@ elif st.session_state.page == 'Squad Analysis':
     # Filter squad options
     filtered_squads = squad_options.copy()
     if search_term:
+        term_norm = normalize_name(search_term)
         filtered_squads = filtered_squads[
-            filtered_squads['Squad'].str.lower().str.contains(search_term.lower())
+            filtered_squads['Squad'].apply(normalize_name).str.contains(term_norm, regex=False)
         ]
     if league_filter != 'All Leagues':
         filtered_squads = filtered_squads[filtered_squads['League'] == league_filter]
@@ -2878,8 +2955,9 @@ elif st.session_state.page == 'Squad Planner':
         search_term = st.text_input("Search Player:", key='planner_search')
         
         if search_term:
-            # Use global df
-            results = df[df['Player'].str.lower().str.contains(search_term.lower())].head(10)
+            # Use global df and name normalization
+            term_norm = normalize_name(search_term)
+            results = df[df['Player'].apply(normalize_name).str.contains(term_norm, regex=False)].head(10)
             
             if not results.empty:
                 player_name_list = results['Player'].tolist()
