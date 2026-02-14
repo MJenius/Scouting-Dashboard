@@ -66,7 +66,7 @@ class PlayerArchetypeClusterer:
         self.silhouette_score_: Optional[float] = None  # Cached Silhouette Score
 
     
-    def optimize_k(self, k_range: range = range(8, 13)) -> int:
+    def optimize_k(self, k_range: range = range(6, 14)) -> int:
         """
         Find optimal k using Silhouette Score with logic to handle advanced metric noise.
         
@@ -178,8 +178,8 @@ class PlayerArchetypeClusterer:
         self.player_archetypes['PCA_Y'] = pca_features[:, 1]
         explained_var = self.pca.explained_variance_ratio_.sum()
         print(f"PCA explains {explained_var*100:.1f}% of variance")
-        if explained_var < 0.65:
-             print("Warning: PCA explained variance is low (<65%). Consider 3D or t-SNE if visualization is cluttered.")
+        if explained_var < 0.70:
+             print("Warning: PCA explained variance is low (<70%). Consider 3D visualization or t-SNE if style separation is unclear.")
         
         return self
     

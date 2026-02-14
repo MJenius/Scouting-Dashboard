@@ -68,12 +68,12 @@ def load_data(file_path: str, low_memory: bool = False) -> pd.DataFrame:
     try:
         # robust delimiter detection
         try:
+            # use automatic delimiter detection
+            df = pd.read_csv(file_path, sep=None, engine='python', low_memory=low_memory)
+        except Exception as e:
+            # Fallback for complex files, default to comma
+            print(f"Warning: Delimiter detection failed ({e}). Falling back to comma.")
             df = pd.read_csv(file_path, low_memory=low_memory)
-            if len(df.columns) <= 1:
-                # Try semicolon
-                df = pd.read_csv(file_path, sep=';', low_memory=low_memory)
-        except:
-             df = pd.read_csv(file_path, sep=';', low_memory=low_memory)
             
     except FileNotFoundError:
         raise FileNotFoundError(f"CSV file not found: {file_path}")
@@ -264,8 +264,16 @@ def clean_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
     # Valid numeric coercion & Instantiation
     for col in FEATURE_COLUMNS + GK_FEATURE_COLUMNS:
         if col not in df.columns:
-            df[col] = 0.0 # Instantiate missing columns with 0
+            df[col] = np.nan # Use NaN for missing columns initially
         df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    # Explicitly mask outfield features for GKs and GK features for outfielders
+    # to prevent quality/scaling contamination.
+    gk_mask = df['Primary_Pos'] == 'GK'
+    if gk_mask.any():
+        df.loc[gk_mask, [c for c in FEATURE_COLUMNS if c in df.columns]] = np.nan
+    if (~gk_mask).any():
+        df.loc[~gk_mask, [c for c in GK_FEATURE_COLUMNS if c in df.columns]] = np.nan
 
     # Create Finishing Efficiency (Gls - xG) - New metric for Hidden Gems
     if 'Gls/90' in df.columns and 'xG90' in df.columns:

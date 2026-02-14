@@ -1198,7 +1198,7 @@ if st.session_state.page == 'Player Search':
                     use_llm = st.checkbox(
                         "Use AI",
                         value=False,
-                        help="Use Google Gemini for context-aware narratives (requires API key)",
+                        help="Use Local AI (Ollama/Llama 3) for context-aware narratives",
                         key='use_llm_narrative'
                     )
                 
@@ -1214,7 +1214,7 @@ if st.session_state.page == 'Player Search':
                                     use_llm=True
                                 )
                             
-                            st.success("AI-Generated Report (Google Gemini)")
+                            st.success("AI-Generated Scouting Report (Local AI)")
                             st.markdown(narrative)
                         else:
                             # Use rule-based generation
@@ -1224,7 +1224,7 @@ if st.session_state.page == 'Player Search':
                     except RuntimeError as e:
                         # AI not available or failed
                         st.error(f"AI Generation Failed: {e}")
-                        st.warning("**AI is not integrated.** Please check your GEMINI_API_KEY in the .env file.")
+                        st.warning("**Local AI is not responding.** Please ensure Ollama is running.")
                         st.info("Uncheck 'Use AI' to see the rule-based report instead.")
                     except Exception as e:
                         st.error(f"Error generating narrative: {e}")

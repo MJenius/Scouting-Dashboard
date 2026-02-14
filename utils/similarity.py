@@ -315,8 +315,8 @@ class SimilarityEngine:
         for idx, player in search_space['Player'].items():
             if pd.isna(player):
                 continue
-            # Compare normalized names for fuzzy matching to improve accuracy with accents
-            score = fuzz.ratio(player_norm, self.normalize_name(player))
+            # Use token_sort_ratio for better handling of name order and accents
+            score = fuzz.token_sort_ratio(player_norm, self.normalize_name(player))
             if score > best_score and score >= self.FUZZY_MATCH_THRESHOLD:
                 best_score = score
                 best_match = idx
@@ -629,7 +629,8 @@ class SimilarityEngine:
                     pct = target_row.get(f"{feat}_pct", 50)
                     if pct > 75:
                         weights[i] *= 3.0
-                    elif pct < 25:
+                    elif pct < 50:
+                        # Reduce penalty for mismatches in "weak" stats (strengths priority)
                         weights[i] *= 0.5 
 
         # Normalize weights to preserve cosine scale

@@ -73,8 +73,8 @@ class ScoutNarrativeGenerator:
         
         Args:
             player_data: Player row from DataFrame with all stats
-            use_llm: Whether to attempt AI generation (Google Gemini)
-            api_key: Optional API key for Gemini
+            use_llm: Whether to attempt AI generation (Local AI)
+            api_key: Optional API key (if required by local proxy)
             
         Returns:
             Dict with narrative sections:
@@ -90,7 +90,7 @@ class ScoutNarrativeGenerator:
                 # Local import to avoid circular dependency
                 from .llm_integration import LLMScoutNarrativeGenerator
                 
-                llm_gen = LLMScoutNarrativeGenerator(api_key=api_key, use_llm=True)
+                llm_gen = LLMScoutNarrativeGenerator(use_llm=True)
                 if llm_gen.use_llm:
                     ai_narrative = llm_gen.generate_narrative(player_data)
                     

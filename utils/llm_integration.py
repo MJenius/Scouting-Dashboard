@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
-DEFAULT_MODEL = "llama3.2"
+DEFAULT_MODEL = "llama3"
 
 # Strict mapping: Natural language terms → Database stat keys
 STAT_KEY_MAPPING = {
@@ -281,11 +281,12 @@ class LLMScoutNarrativeGenerator:
     Falls back to rule-based generator if offline.
     """
     
-    def __init__(self, model: str = DEFAULT_MODEL):
+    def __init__(self, model: str = DEFAULT_MODEL, use_llm: bool = True, **kwargs):
         self.fallback = ScoutNarrativeGenerator()
         self.client = None
         self.model = model
         self.available = False
+        self.use_llm = use_llm
         
         if OPENAI_AVAILABLE and is_ollama_available():
             self.client = OpenAI(
@@ -320,28 +321,33 @@ class LLMScoutNarrativeGenerator:
                  z_score = top_dom.iloc[0]
                  dom_context = f"\n- Dominance: {z_score:+.2f} Z-score for {metric} (League Context)"
 
-        prompt = f"""You are a professional football scout. Write a 3-sentence scouting summary for:
+        prompt = f"""You are a professional football scout. Write a comprehensive, deep-dive scouting report (3-4 paragraphs, approx 250 words) for the following player:
         
-Name: {name}
-Age: {age}
-Position: {pos}
-Club/League: {player_data.get('Squad', '')} ({league})
-Archetype: {archetype}
+PLAYER PROFILE:
+- Name: {name}
+- Age: {age}
+- Position: {pos}
+- Club/League: {player_data.get('Squad', '')} ({league})
+- Archetype: {archetype}
 
-Key Stats:
+PERFORMANCE CONTEXT:
 - Goals/90: {player_data.get('Gls/90', 0):.2f}
 - Assists/90: {player_data.get('Ast/90', 0):.2f}
 {dom_context}
 
-Strengths: {', '.join(strengths)}
-Weaknesses: {', '.join(weaknesses)}
+STATISTICAL PROFILE (Percentiles vs Peers):
+- Strengths: {', '.join(strengths)}
+- Weaknesses: {', '.join(weaknesses)}
 
-Instructions:
-1. Synthesize the strengths/weaknesses and archetype into a cohesive narrative.
-2. Mention if they are over/under-performing based on age or dominance.
-3. Keep it strictly 3 sentences. Professional tone. No fluff.
+INSTRUCTIONS:
+1. Start with an assessment of their overall profile and how they fit their '{archetype}' role.
+2. Analyze their key strengths, explaining the tactical impact of their high percentile ranks.
+3. Discuss areas for development or statistical anomalies (e.g., dominance vs raw volume).
+4. Conclude with a scout's recommendation on their ceiling and suitability for top-tier competition.
+5. Maintain a professional, objective scouting tone. Use technical football language.
+6. Target a length similar to a full rule-based report (approx 250 words).
 
-Summary:"""
+REPORT:"""
         return prompt
 
     def generate_narrative(self, player_data: pd.Series) -> str:
@@ -363,7 +369,7 @@ Summary:"""
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
-                max_tokens=100
+                max_tokens=1000
             )
             return response.choices[0].message.content.strip()
             

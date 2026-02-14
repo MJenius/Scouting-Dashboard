@@ -248,9 +248,12 @@ class PlotlyVisualizations:
             else:
                 color = "Low"
             
+            # Ensure pct is a valid float for Streamlit's ProgressColumn
+            pct_val = float(pct) if pd.notna(pct) else 0.0
+            
             data.append({
                 'Feature': feature,
-                'Percentile': f"{pct:.1f}%",
+                'Percentile': pct_val,
                 'Bar': bar,
                 'Ranking': color,
             })
