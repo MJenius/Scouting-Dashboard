@@ -15,7 +15,11 @@ import numpy as np
 from datetime import datetime
 from dotenv import load_dotenv
 import unicodedata
+import logging
 from streamlit_option_menu import option_menu
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -40,7 +44,7 @@ from utils import (
 )
 from utils.visualizations import PlotlyVisualizations
 from utils.recruitment_logic import project_to_tier
-from utils.llm_integration import AgenticScoutChat, is_ollama_available, generate_llm_narrative
+from utils.llm_integration import AgenticScoutChat, is_ollama_available, generate_llm_narrative, extract_filters_fallback
 import plotly.express as px
 import plotly.graph_objects as go
 from typing import Optional, Dict, List, Any
@@ -162,7 +166,7 @@ with st.sidebar:
     # Navigation Menu
     menu_options = ['Player Search', 'Head-to-Head', 'Hidden Gems', 'Leaderboards', 'Squad Analysis', 'Squad Planner']
     
-    # Get index of current page for manual_select (must be integer)
+    # Get index of current page for default_index
     try:
         current_page_index = menu_options.index(st.session_state.page)
     except (ValueError, AttributeError):
@@ -174,12 +178,11 @@ with st.sidebar:
         icons=['search', 'intersect', 'gem', 'trophy', 'bar-chart-line', 'clipboard-check'],
         menu_icon="cast",
         default_index=current_page_index,
-        manual_select=current_page_index,
         key='sidebar_nav'
     )
     
-    # Update session state page immediately
-    if selected_page != st.session_state.page:
+    # Update session state page immediately if user clicks menu
+    if selected_page and selected_page != st.session_state.page:
         st.session_state.page = selected_page
         st.rerun()
 
@@ -699,6 +702,10 @@ st.divider()
 if 'chat_messages' not in st.session_state:
     st.session_state.chat_messages = []
 
+# Track if chat initiated a page change
+if 'chat_page_change' not in st.session_state:
+    st.session_state.chat_page_change = False
+
 def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
     """
     Route the AI's intent to the appropriate page and apply filters.
@@ -706,6 +713,8 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
     """
     action = api_params.get('action')
     target_page = api_params.get('target_page')
+    
+    logger.info(f"dispatch_agentic_action - action: {action}, target_page: {target_page}")
     
     response_parts = []
     needs_rerun = False
@@ -752,8 +761,13 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
     # Navigate to target page
     valid_pages = ['Leaderboards', 'Head-to-Head', 'Player Search', 'Hidden Gems', 'Squad Analysis', 'Squad Planner']
     if target_page and target_page in valid_pages:
+        logger.info(f"Setting page to {target_page}")
         st.session_state.page = target_page
+        st.session_state.chat_page_change = True  # Flag that chat changed the page
         response_parts.append(f"Navigating to **{target_page}**")
+        needs_rerun = True
+    elif target_page:
+        logger.warning(f"target_page '{target_page}' not in valid_pages: {valid_pages}")
         needs_rerun = True
     
     # Apply page-specific filters based on action
@@ -1007,21 +1021,27 @@ with st.expander("Agentic Scout Chat", expanded=False):
             with st.chat_message("user"):
                 st.markdown(prompt)
         
-        # 2. Show loading indicator while processing
+        # 2. Process with Agentic AI with streaming status updates
         with chat_container:
             with st.chat_message("assistant"):
-                with st.status("Analyzing request...", expanded=True) as status:
+                status_placeholder = st.empty()
+                progress_placeholder = st.empty()
+                
+                try:
+                    # Show initial status
+                    status_placeholder.status("🔍 **Analyzing request**...", expanded=True)
+                    
                     # Process with Agentic AI
                     chat_agent = AgenticScoutChat()
                     if chat_agent.available:
-                        st.write("Parsing intent...")
+                        progress_placeholder.info("📝 Parsing intent with AI...")
                         filters = chat_agent.parse_intent(prompt)
                         
                         if "error" in filters:
-                            response_text = f"Error: {filters['error']}"
+                            response_text = f"⚠️ **Error:** {filters['error']}"
                             needs_rerun = False
                         else:
-                            st.write("Applying filters and navigation...")
+                            progress_placeholder.info("✅ Intent parsed! Applying filters...")
                             # Get API params with actions
                             api_params = chat_agent.get_api_params(filters)
                             
@@ -1029,24 +1049,47 @@ with st.expander("Agentic Scout Chat", expanded=False):
                             action_result, needs_rerun = dispatch_agentic_action(api_params)
                             
                             # Build response
-                            response_text = f"**Action:** {action_result}\n\n"
-                            response_text += "**Parsed Intent:**\n"
+                            response_text = f"**✨ Action:** {action_result}\n\n"
+                            response_text += "**📊 Parsed Intent:**\n"
                             for k, v in filters.items():
-                                response_text += f"- `{k}`: {v}\n"
-                        status.update(label="Analysis complete!", state="complete", expanded=False)
+                                if k not in ['action', 'target_page']:  # Skip verbose keys
+                                    response_text += f"- `{k}`: {v}\n"
+                        status_placeholder.success("✅ Analysis complete!")
                     else:
-                        response_text = "**Local AI is Offline.** Please start Ollama to use this feature."
-                        needs_rerun = False
-                        status.update(label="Ollama Offline", state="error")
+                        response_text = "🔴 **Ollama Offline.** Using rule-based filtering...\n\n"
+                        chat_agent = AgenticScoutChat()
+                        filters = extract_filters_fallback(prompt)
+                        api_params = chat_agent.get_api_params(filters)
+                        action_result, needs_rerun = dispatch_agentic_action(api_params)
+                        response_text += f"**✨ Action:** {action_result}"
+                        status_placeholder.warning("⚠️ Using fallback filters")
+                    
+                    progress_placeholder.empty()
+                
+                except Exception as e:
+                    logger.exception("Chat error")
+                    response_text = f"❌ **Error:** {str(e)}"
+                    needs_rerun = False
+                    status_placeholder.error(f"❌ Failed: {str(e)[:50]}...")
+                    progress_placeholder.empty()
         
         # 3. Save response to session state
         st.session_state.chat_messages.append({"role": "assistant", "content": response_text})
         
         # 4. CRITICAL: Rerun to apply navigation/filter changes immediately
         if needs_rerun:
+            st.session_state.chat_page_change = False  # Reset flag before rerun
             st.rerun()
         else:
-            st.rerun() # Refresh to clear the status box and show the persistent markdown message instead
+            st.rerun()  # Refresh to show persistent message instead of status box
+
+# ============================================================================
+# PAGE NAVIGATION: Check if chat initiated a page change and show in title
+# ============================================================================
+if st.session_state.get('chat_page_change', False):
+    # Visual feedback that page changed
+    st.info(f"✅ Page changed to: **{st.session_state.page}**", icon="📍")
+    st.session_state.chat_page_change = False
 
 st.divider()
 

@@ -5,10 +5,14 @@ This module provides:
 - Agentic Chat implementation (Text-to-JSON filters)
 - Context-aware scouting narratives using local models (Llama 3, Mistral)
 - Fallback to rule-based generation if Ollama is offline
+- Response caching for query/intent performance optimization
+- Timeout & retry logic with fallback filter extraction
 
 Configuration:
 - Base URL: http://localhost:11434/v1
-- Model: llama3 (default), mistral, or any pulled Ollama model
+- Model: mistral (recommended for speed), llama3, or any pulled Ollama model
+- Cache TTL: 30 minutes for intent queries
+- Timeout: 5 seconds for API calls
 """
 
 import os
@@ -16,8 +20,12 @@ import json
 import logging
 import requests
 import pandas as pd
+import time
+import hashlib
+import re
+from functools import lru_cache
 from typing import Optional, Dict, List, Any, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Import OpenAI client for Ollama compatibility
 try:
@@ -32,11 +40,17 @@ from .narrative_generator import ScoutNarrativeGenerator
 logger = logging.getLogger(__name__)
 
 # ============================================================================
+# PERFORMANCE CONSTANTS
+# ============================================================================
+API_TIMEOUT = 5.0  # Aggressive timeout to fail-fast
+CACHE_TTL_SECONDS = 1800  # 30 minutes cache for intent queries
+DEFAULT_MODEL = "mistral"  # Faster than llama3 for intent parsing
+
+# ============================================================================
 # CONSTANTS & MAPPINGS
 # ============================================================================
 
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
-DEFAULT_MODEL = "llama3"
 
 # Strict mapping: Natural language terms → Database stat keys
 STAT_KEY_MAPPING = {
@@ -61,72 +75,171 @@ STAT_KEY_MAPPING = {
     'xa': {'scouting': 'xA90_Dominance', 'filter': 'xA90', 'display': 'xA/90'},
 }
 
+# ============================================================================
+# QUERY CACHE FOR PERFORMANCE OPTIMIZATION
+# ============================================================================
+
+class IntentQueryCache:
+    """Simple TTL-based cache for intent parsing results."""
+    def __init__(self, ttl_seconds: int = CACHE_TTL_SECONDS):
+        self.cache: Dict[str, Tuple[Dict, float]] = {}
+        self.ttl = ttl_seconds
+    
+    def _hash_query(self, query: str) -> str:
+        """Create hash of normalized query for cache key."""
+        normalized = query.lower().strip()
+        return hashlib.md5(normalized.encode()).hexdigest()
+    
+    def get(self, query: str) -> Optional[Dict]:
+        """Get cached result if exists and not expired."""
+        key = self._hash_query(query)
+        if key in self.cache:
+            result, timestamp = self.cache[key]
+            if time.time() - timestamp < self.ttl:
+                logger.debug(f"Cache HIT for query: {query[:50]}...")
+                return result
+            else:
+                # Expired, remove
+                del self.cache[key]
+                logger.debug(f"Cache EXPIRED for query: {query[:50]}...")
+        return None
+    
+    def set(self, query: str, result: Dict) -> None:
+        """Store result in cache."""
+        key = self._hash_query(query)
+        self.cache[key] = (result, time.time())
+        logger.debug(f"Cache MISS → STORED for query: {query[:50]}...")
+    
+    def clear(self) -> None:
+        """Clear all cached results."""
+        self.cache.clear()
+
+# Global cache instance
+_intent_cache = IntentQueryCache()
+
+# ============================================================================
+# FALLBACK FILTER EXTRACTION (Rule-based, Fast)
+# ============================================================================
+
+def extract_filters_fallback(query: str) -> Dict[str, Any]:
+    """
+    Fallback rule-based filter extraction when Ollama is slow/offline.
+    Uses regex patterns and keyword matching. ~50ms latency vs 1-2s for LLM.
+    """
+    filters = {}
+    q = query.lower()
+    
+    # Determine action
+    if any(x in q for x in ['compare', 'vs', 'head to head', 'versus']):
+        filters['action'] = 'compare'
+        filters['target_page'] = 'Head-to-Head'
+    elif any(x in q for x in ['best', 'top', 'ranking', 'leaderboard']):
+        filters['action'] = 'leaderboard'
+        filters['target_page'] = 'Leaderboards'
+    elif any(x in q for x in ['hidden gem', 'undervalued', 'bargain', 'cheap']):
+        filters['action'] = 'hidden_gems'
+        filters['target_page'] = 'Hidden Gems'
+    elif any(x in q for x in ['find', 'search', 'show me']) and 'like' not in q:
+        filters['action'] = 'search'
+        filters['target_page'] = 'Player Search'
+    elif any(x in q for x in ['like', 'similar', 'next']):
+        filters['action'] = 'find_similar'
+        filters['target_page'] = 'Hidden Gems'
+    elif any(x in q for x in ['squad plan', 'build squad', 'build team']):
+        filters['action'] = 'squad_planner'
+        filters['target_page'] = 'Squad Planner'
+    elif any(x in q for x in ['squad analysis', 'analyze']):
+        filters['action'] = 'squad_analysis'
+        filters['target_page'] = 'Squad Analysis'
+    else:
+        filters['action'] = 'search'
+        filters['target_page'] = 'Player Search'
+    
+    # Extract age ranges
+    age_match = re.search(r'(under|younger than)\s+(\d+)', q)
+    if age_match:
+        filters['max_age'] = int(age_match.group(2))
+    age_match = re.search(r'(over|older than)\s+(\d+)', q)
+    if age_match:
+        filters['min_age'] = int(age_match.group(2))
+    
+    # Extract positions
+    pos_map = {'striker': 'FW', 'forward': 'FW', 'winger': 'FW', 'midfielder': 'MF', 
+               'defender': 'DF', 'goalkeeper': 'GK', 'keeper': 'GK'}
+    for term, pos in pos_map.items():
+        if term in q:
+            filters['position'] = pos
+            break
+    
+    # Extract metrics
+    metric_map = {'goal': 'Gls/90', 'score': 'Gls/90', 'assist': 'Ast/90', 
+                  'xg': 'xG90', 'xa': 'xA90', 'tackle': 'TklW/90'}
+    for term, metric in metric_map.items():
+        if term in q:
+            filters['metric'] = metric
+            break
+    
+    # Extract league names (simplified)
+    leagues = ['Premier League', 'La Liga', 'Serie A', 'Bundesliga', 'Ligue 1', 
+               'Championship', 'League One', 'League Two', 'National League']
+    for league in leagues:
+        if league.lower() in q:
+            filters['league'] = league
+            break
+    
+    # Try to extract player names (simple heuristic: capitalized words)
+    words = query.split()
+    cap_words = [w.strip('.,;:') for w in words if w and w[0].isupper() and len(w) > 2]
+    
+    if cap_words:
+        if 'compare' in q or 'vs' in q:
+            # For compare: extract first two capitalized names
+            if len(cap_words) >= 2:
+                filters['player_name'] = cap_words[0]
+                filters['compare_player'] = cap_words[1]
+        elif 'squad plan' in q or 'build squad' in q or 'build team' in q or 'create team' in q:
+            # For squad planner: extract ALL capitalized names as squad players
+            filters['squad_players'] = cap_words
+            logger.info(f"Extracted squad players: {cap_words}")
+        else:
+            # For other actions: just first name
+            filters['player_name'] = cap_words[0]
+    
+    logger.info(f"Fallback extraction: {filters}")
+    return filters
+
 # Database schema description for System Prompt
-SYSTEM_PROMPT_FILTER = """You are a football scouting assistant. 
-Output ONLY valid JSON. No markdown, no explanations, no chat.
+# OPTIMIZED: Reduced from 500+ to ~250 tokens, kept only critical mappings
+SYSTEM_PROMPT_FILTER = """You are a football scouting assistant. Output ONLY valid JSON. No markdown.
 
-Your task is to convert the user's scouting query into a JSON object with an ACTION and FILTERS.
+TASK: Convert user query to JSON with ACTION, TARGET_PAGE, and optional FILTERS.
 
-AVAILABLE SCHEMA (Use only these keys):
-{
-    "action": str (REQUIRED: "leaderboard" | "compare" | "search" | "find_similar" | "hidden_gems" | "squad_analysis" | "squad_planner"),
-    "target_page": str (Auto-mapped from action: "Leaderboards" | "Head-to-Head" | "Player Search" | "Hidden Gems" | "Squad Analysis" | "Squad Planner"),
-    "priority": str (For benchmark find_similar: "Standard", "Attacker", "Midfielder", "Defender", "High Ceiling", "Data Rich"),
-    "target_league": str (Alternative for 'league', ensures matching in Hidden Gems)
-}
+ACTIONS & PAGES:
+- "best" / "top" / "ranking" → action: "leaderboard", target_page: "Leaderboards"
+- "compare X vs Y" → action: "compare", target_page: "Head-to-Head", player_name: "X", compare_player: "Y"
+- "find like X" / "similar" → action: "find_similar", target_page: "Hidden Gems", player_name: "X"
+- "hidden gems" / "undervalued" → action: "hidden_gems", target_page: "Hidden Gems"
+- "search X" / "find X" → action: "search", target_page: "Player Search", player_name: "X"
+- "squad analysis X" → action: "squad_analysis", target_page: "Squad Analysis", team_name: "X"
+- "build squad" / "make squad" / "create team" with player list → action: "squad_planner", target_page: "Squad Planner", squad_players: [list of all player names]
 
-ACTION ROUTING RULES:
-- "best X" / "top scorers" / "leaders" / "ranking"           -> {"action": "leaderboard", "target_page": "Leaderboards"}
-- "compare X with Y" / "X vs Y"                               -> {"action": "compare", "target_page": "Head-to-Head"}
-- "find players like X" / "similar to X" / "next X"           -> {"action": "find_similar", "target_page": "Hidden Gems" if "next" in query or "Hidden Gems" in query else "Player Search"}
-- "hidden gems" / "undervalued" / "underrated" / "bargain"    -> {"action": "hidden_gems", "target_page": "Hidden Gems"}
-- "search for X" / "find X" / "show me X" (specific player)   -> {"action": "search", "target_page": "Player Search"}
-- "squad analysis of X" / "analyze X team"                    -> {"action": "squad_analysis", "target_page": "Squad Analysis"}
-- "squad plan" / "build a squad with X,Y,Z"                   -> {"action": "squad_planner", "target_page": "Squad Planner"}
+OPTIONAL FILTERS: league, position, min_age, max_age, metric, priority
 
-METRIC INFERENCE RULES:
-- "scorer", "goals", "prolific", "striker"   -> metric: "Gls/90"
-- "creator", "assists", "playmaker"          -> metric: "Ast/90"
-- "xg", "expected goals"                     -> metric: "xG90"
-- "interceptor", "defensive mid"             -> metric: "Int/90"
-- "tackler", "ball winner"                   -> metric: "TklW/90"
-- "crosser", "winger"                        -> metric: "Crs/90"
+IMPORTANT for squad_planner:
+- Extract ALL player names mentioned (separated by commas, "and", or "with")
+- Return as array: squad_players: ["Bruno Fernandes", "Haaland", "Rudiger"]
+- Do NOT abbreviate names
 
-PRIORITY MAPPING RULES:
-- "offensive" / "shooting" -> priority: "Attacker"
-- "passing" / "midfield" -> priority: "Midfielder"
-- "defensive" / "tackling" -> priority: "Defender"
-- "potential" / "ceiling" -> priority: "High Ceiling"
+Example 1: "Compare Haaland with Mbappe"
+{"action": "compare", "target_page": "Head-to-Head", "player_name": "Haaland", "compare_player": "Mbappe"}
 
-AGE MAPPING RULES:
-- "Young" -> {"max_age": 23}
-- "Prime" or "Peak" -> {"min_age": 24, "max_age": 29}
-- "Experienced" -> {"min_age": 30}
+Example 2: "Show hidden gems under 21 in Serie A"
+{"action": "hidden_gems", "target_page": "Hidden Gems", "max_age": 21, "league": "Serie A"}
 
-POSITION MAPPING RULES:
-- "Striker" / "Forward" -> {"position": "FW"}
-- "Midfielder" -> {"position": "MF"}
-- "Defender" -> {"position": "DF"}
-- "Goalkeeper" / "Keeper" -> {"position": "GK"}
+Example 3: "Make a squad with Bruno Fernandes, Haaland, Rudiger"
+{"action": "squad_planner", "target_page": "Squad Planner", "squad_players": ["Bruno Fernandes", "Haaland", "Rudiger"]}
 
-Example 1: "Find me the best striker in Serie A"
-Output: {"action": "leaderboard", "target_page": "Leaderboards", "position": "FW", "league": "Serie A", "metric": "Gls/90"}
-
-Example 2: "Compare Haaland with Mbappe"
-Output: {"action": "compare", "target_page": "Head-to-Head", "player_name": "Haaland", "compare_player": "Mbappe"}
-
-Example 3: "Find young hidden gems under 21"
-Output: {"action": "hidden_gems", "target_page": "Hidden Gems", "max_age": 21}
-
-Example 4: "Find the next Robert Lewandowski in Championship with offensive priority"
-Output: {"action": "find_similar", "target_page": "Hidden Gems", "player_name": "Robert Lewandowski", "league": "Championship", "priority": "Attacker"}
-
-Example 5: "Give me a squad analysis of Birmingham City"
-Output: {"action": "squad_analysis", "target_page": "Squad Analysis", "team_name": "Birmingham City"}
-
-Example 6: "Build a squad with De Gea, Nuno Mendes, Trent Alexander Arnold, Mbappe"
-Output: {"action": "squad_planner", "target_page": "Squad Planner", "squad_players": ["De Gea", "Nuno Mendes", "Trent Alexander Arnold", "Mbappe"]}
-"""
+ALWAYS include action and target_page. Return valid JSON only."""
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -190,49 +303,108 @@ class AgenticScoutChat:
                 
     def parse_intent(self, user_query: str) -> Dict[str, Any]:
         """
-        Convert user query to structured filter JSON.
+        Convert user query to structured filter JSON with caching and fallback.
+        
+        Performance optimizations:
+        1. Checks cache first (~0ms if hit)
+        2. Uses timeout to fail-fast on slow Ollama (~5s max)
+        3. Falls back to rule-based extraction if LLM fails (~50ms)
+        4. Caches successful results for future identical queries
         """
         if not self.available:
-            return {"error": "Local AI is offline"}
-            
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT_FILTER},
-                    {"role": "user", "content": user_query}
-                ],
-                temperature=0.1,  # Low temperature for deterministic JSON
-                max_tokens=150,
-                response_format={"type": "json_object"}  # Structured Output
-            )
-            
-            content = response.choices[0].message.content
-            
-            # Additional JSON cleaning if model outputs markdown code blocks
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].strip()
+            logger.info("Ollama offline, using fallback extraction")
+            return extract_filters_fallback(user_query)
+        
+        # 1. CHECK CACHE FIRST
+        cached = _intent_cache.get(user_query)
+        if cached is not None:
+            return cached
+        
+        # 2. TRY LLM WITH TIMEOUT & RETRY
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                start_time = time.time()
                 
-            return json.loads(content)
-            
-        except Exception as e:
-            logger.error(f"Intent parsing failed: {e}")
-            return {"error": str(e)}
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT_FILTER},
+                        {"role": "user", "content": user_query}
+                    ],
+                    temperature=0.1,
+                    max_tokens=100,  # Reduced from 150
+                    timeout=API_TIMEOUT,
+                    response_format={"type": "json_object"}
+                )
+                
+                elapsed = time.time() - start_time
+                logger.info(f"Intent parsing via LLM ({self.model}): {elapsed:.2f}s")
+                
+                content = response.choices[0].message.content
+                
+                # Clean JSON if wrapped in markdown
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].split("```")[0].strip()
+                
+                result = json.loads(content)
+                
+                # Cache successful result
+                _intent_cache.set(user_query, result)
+                return result
+                
+            except requests.exceptions.Timeout:
+                logger.warning(f"Ollama timeout on attempt {attempt+1}/{max_retries}")
+                if attempt < max_retries - 1:
+                    time.sleep(0.5)  # Brief backoff before retry
+                    continue
+            except json.JSONDecodeError as e:
+                logger.warning(f"JSON parse error: {e}")
+                if attempt < max_retries - 1:
+                    continue
+            except Exception as e:
+                logger.warning(f"LLM error (attempt {attempt+1}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(0.5)
+                    continue
+        
+        # 3. FALLBACK TO RULE-BASED EXTRACTION
+        logger.info("LLM failed/timed out, using fallback extraction")
+        result = extract_filters_fallback(user_query)
+        _intent_cache.set(user_query, result)
+        return result
 
     def get_api_params(self, filters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Convert internal JSON filters to actual API parameter names.
         Now includes navigation actions for page routing.
+        Automatically maps action → target_page if not explicitly provided.
         """
         params = {}
         
+        # Auto-map action to target_page if not present
+        action_to_page_map = {
+            'leaderboard': 'Leaderboards',
+            'compare': 'Head-to-Head',
+            'search': 'Player Search',
+            'find_similar': 'Hidden Gems',
+            'hidden_gems': 'Hidden Gems',
+            'squad_analysis': 'Squad Analysis',
+            'squad_planner': 'Squad Planner'
+        }
+        
         # Navigation actions
-        if 'action' in filters: 
+        if 'action' in filters:
             params['action'] = filters['action']
-        if 'target_page' in filters: 
+            # Auto-map action to target_page if not explicitly set
+            if 'target_page' not in filters:
+                params['target_page'] = action_to_page_map.get(filters['action'])
+        
+        if 'target_page' in filters:
             params['target_page'] = filters['target_page']
+        
         if 'metric' in filters: 
             params['metric'] = filters['metric']
         if 'player_name' in filters:
@@ -267,7 +439,9 @@ class AgenticScoutChat:
             params['priority'] = filters['priority']
         if 'target_league' in filters:
             params['target_league'] = filters['target_league']
-            
+        
+        # Debug logging
+        logger.info(f"API params: {params}")
         return params
 
 
@@ -351,30 +525,35 @@ REPORT:"""
         return prompt
 
     def generate_narrative(self, player_data: pd.Series) -> str:
-        """Generate narrative with fallback."""
-        if not self.available:
+        """Generate narrative with timeout and fallback."""
+        if not self.available or not self.use_llm:
             return self.fallback.generate_narrative(player_data)
         
         try:
-            # Get simple strengths/weaknesses for prompt
-            # (Reusing logic would be better, but quick implementation here)
-            # Simulating basic strength finding:
             dict_data = player_data.to_dict()
             strengths = [k for k,v in dict_data.items() if '_pct' in k and isinstance(v, (int, float)) and v > 80][:3]
             weaknesses = [k for k,v in dict_data.items() if '_pct' in k and isinstance(v, (int, float)) and v < 30][:2]
             
             prompt = self._build_prompt(player_data, strengths, weaknesses)
             
+            start_time = time.time()
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
-                max_tokens=1000
+                max_tokens=800,  # Reduced from 1000
+                timeout=API_TIMEOUT * 2  # Allow longer for narrative generation
             )
+            elapsed = time.time() - start_time
+            logger.info(f"Narrative generation: {elapsed:.2f}s")
+            
             return response.choices[0].message.content.strip()
             
+        except requests.exceptions.Timeout:
+            logger.warning("Narrative generation timeout, using fallback")
+            return self.fallback.generate_narrative(player_data)
         except Exception as e:
-            logger.error(f"Local AI Narrative Failed: {e}")
+            logger.warning(f"LLM Narrative failed ({e}), using fallback")
             return self.fallback.generate_narrative(player_data)
 
 
