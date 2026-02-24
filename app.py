@@ -1153,6 +1153,7 @@ if st.session_state.page == 'Player Search':
                 idx = engine._find_player_index(selected_player)
                 if idx is not None and idx in df.index:
                     player_data = df.loc[idx]
+                    p_name = player_data['Player']
                 else:
                     st.error(f"**Data Alignment Issue**: Could not find data for '{selected_player}' in the current tactical map.")
                     st.info("This can happen if the cache is out of sync. Please click **'Reset Cache & Reload Data'** in the sidebar.")
@@ -1429,67 +1430,79 @@ if st.session_state.page == 'Player Search':
                     
                     # Get age-curve status for selected metric
                     age_status = analyzer.get_player_age_curve_status(
-                        selected_player,
+                        p_name,
                         key_metric
                     )
                     
                     if age_status:
-                        col1, col2, col3 = st.columns([2, 1, 1])
+                        # Header with badge
+                        badge = format_age_curve_badge(age_status)
+                        if age_status.z_score >= 1.5:
+                            st.success(f"### {badge}")
+                        elif age_status.z_score <= -1.5:
+                            st.warning(f"### {badge}")
+                        else:
+                            st.info(f"### {badge}")
+                            
+                        # Metrics row
+                        m1, m2, m3, m4 = st.columns(4)
                         
-                        with col1:
-                            # Show badge if high-ceiling
-                            if age_status.is_high_ceiling:
-                                badge = format_age_curve_badge(age_status)
-                                st.success(f"**{badge}**")
-                                st.caption(
-                                    f"This player's {key_metric} ({age_status.player_value:.2f}) is "
-                                    f"{age_status.z_score:.1f} standard deviations above the average "
-                                    f"for {age_status.age}-year-olds in {age_status.league}."
-                                )
-                            else:
-                                st.info(
-                                    f"**Age-Appropriate Performance** - "
-                                    f"{key_metric}: {age_status.player_value:.2f} "
-                                    f"(Age cohort average: {age_status.age_mean:.2f})"
-                                )
-                        
-                        with col2:
+                        with m1:
                             st.metric(
-                                "Z-Score",
+                                "Local Z-Score", 
                                 f"{age_status.z_score:.2f}",
-                                help="Standard deviations above age cohort mean"
+                                help=f"Standard deviations above/below average for {age_status.cohort_type} (Age {age_status.age})"
                             )
-                        
-                        with col3:
+                        with m2:
                             st.metric(
-                                "Age Percentile",
-                                f"{age_status.percentile_rank:.0f}%",
-                                help="Rank within same-age players"
+                                "Global Z-Score", 
+                                f"{age_status.global_z_score:.2f}",
+                                help=f"Standard deviations above/below average for ALL players age {age_status.age}"
                             )
-                        
-                        # Show age cohort comparison
-                        with st.expander(f"View Age Cohort Comparison ({key_metric})"):
-                            age_curves = analyzer.calculate_age_curves(
-                                key_metric,
-                                position=player_data['Primary_Pos'],
-                                league=player_data['League']
+                        with m3:
+                            st.metric(
+                                "Age Percentile", 
+                                f"{age_status.percentile_rank:.0f}%",
+                                help="Rank within immediate age cohort"
+                            )
+                        with m4:
+                            st.metric(
+                                "Cohort Size", 
+                                f"{age_status.local_cohort_size}",
+                                help=f"Number of players in the {age_status.cohort_type} comparison group"
                             )
                             
-                            if len(age_curves) > 0:
-                                from utils.visualizations import PlotlyVisualizations
-                                age_curve_fig = PlotlyVisualizations.age_curve(
-                                    df[df['Primary_Pos'] == player_data['Primary_Pos']],
-                                    key_metric,
-                                    position=player_data['Primary_Pos'],
-                                    target_player=selected_player,
-                                    height=400
-                                )
-                                st.plotly_chart(age_curve_fig, use_container_width=True)
-                                
-                                st.write(f"**Age {age_status.age} Statistics ({player_data['Primary_Pos']}, {player_data['League']}):**")
-                                st.write(f"- Mean: {age_status.age_mean:.2f}")
-                                st.write(f"- Std Dev: {age_status.age_std:.2f}")
-                                st.write(f"- Player Value: {age_status.player_value:.2f}")
+                        # Narrative Detail
+                        st.markdown(f"""
+                        **How to read this analysis:**
+                        - **Z-Score:** A measure of how many 'Standard Deviations' a player is from the average. 
+                          *   `0.0` is exactly average. 
+                          *   `+2.0` means they are in the **top 2.5%** of their age group.
+                          *   `+3.0` is elite outlier territory.
+                        
+                        **Cohort Deep-Dive:**
+                        - **Local Comparison ({age_status.cohort_type}):** {p_name} is compared to **{age_status.local_cohort_size}** other {age_status.position}s of the same age in {age_status.league if age_status.cohort_type == 'League-Pos' else 'similar tiers'}.
+                        - **Global Benchmark:** In the entire database of **{age_status.global_cohort_size}** players aged {age_status.age}, they rank in the **{age_status.global_percentile:.0f}th percentile**.
+                        - **Performance:** Their {key_metric} of **{age_status.player_value:.2f}** is compared against a cohort mean of **{age_status.age_mean:.2f}**.
+                        """)
+                        
+                        # Show age cohort comparison
+                        with st.expander(f"📈 View Performance Trend & Expectation Zone"):
+                            # Logic: If using fallback, show the fallback group's curve
+                            plot_league = age_status.league if age_status.cohort_type == 'League-Pos' else 'All'
+                            
+                            age_curve_fig = PlotlyVisualizations.age_curve(
+                                df,
+                                key_metric,
+                                position=age_status.position,
+                                league=plot_league,
+                                target_player=p_name,
+                                height=450
+                            )
+                            st.plotly_chart(age_curve_fig, use_container_width=True)
+                            
+                            st.caption(f"The shaded blue area represents the 'Expectation Zone' (±1 standard deviation from the mean). "
+                                      f"Players above this zone are significantly outperforming their age peers.")
                     else:
                         st.info("Age-curve analysis unavailable (insufficient age cohort data)")
                 

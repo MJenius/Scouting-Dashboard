@@ -139,81 +139,126 @@ class PlotlyVisualizations:
         df: pd.DataFrame,
         metric: str,
         position: Optional[str] = None,
+        league: Optional[str] = None,
         target_player: Optional[str] = None,
         height: int = 500,
     ) -> go.Figure:
         """
-        Create age-curve chart showing performance trend by age.
+        Create a premium age-curve chart with standard deviation shading.
         
         Args:
             df: Player DataFrame
             metric: Metric to analyze
-            position: Filter by position (FW, MF, DF, GK)
+            position: Filter by position
+            league: Filter by league
             target_player: Highlight specific player
             height: Chart height
             
         Returns:
             Plotly Figure
         """
-        # Filter by position
+        # Filter data
+        plot_df = df.copy()
         if position:
-            plot_df = df[df['Primary_Pos'] == position].copy()
-        else:
-            plot_df = df.copy()
+            plot_df = plot_df[plot_df['Primary_Pos'] == position]
+        if league and league != 'All':
+            plot_df = plot_df[plot_df['League'] == league]
+            
+        if len(plot_df) == 0:
+            fig = go.Figure()
+            PlotlyVisualizations._apply_dark_theme(fig, title="No Data for Age Curve", height=height)
+            return fig
+
+        # Ensure Age is numeric and rounded
+        plot_df['Age_Group'] = plot_df['Age'].round()
         
-        # Group by age and compute mean
-        age_stats = plot_df.groupby('Age').agg({
-            metric: ['mean', 'median', 'count'],
+        # Group by age
+        age_stats = plot_df.groupby('Age_Group').agg({
+            metric: ['mean', 'std', 'median', 'count']
         }).reset_index()
-        age_stats.columns = ['Age', 'Mean', 'Median', 'Count']
+        
+        age_stats.columns = ['Age', 'Mean', 'Std', 'Median', 'Count']
+        age_stats = age_stats.sort_values('Age')
+        age_stats['Std'] = age_stats['Std'].fillna(0.0)
+        
+        # Filter for meaningful counts if possible, but keep at least 1
+        # age_stats = age_stats[age_stats['Count'] >= 1]
         
         fig = go.Figure()
         
-        # Add mean line
+        # 1. Add Shaded Area (Expectation Zone: Mean +/- 1 Std Dev)
+        fig.add_trace(go.Scatter(
+            x=list(age_stats['Age']) + list(age_stats['Age'][::-1]),
+            y=list(age_stats['Mean'] + age_stats['Std']) + list((age_stats['Mean'] - age_stats['Std'])[::-1]),
+            fill='toself',
+            fillcolor='rgba(52, 152, 219, 0.2)',
+            line=dict(color='rgba(255,255,255,0)'),
+            hoverinfo="skip",
+            showlegend=True,
+            name='Expectation Zone (±1σ)'
+        ))
+        
+        # 2. Add Mean Trendline
         fig.add_trace(go.Scatter(
             x=age_stats['Age'],
             y=age_stats['Mean'],
             mode='lines+markers',
-            name='Mean',
+            name='Cohort Mean',
             line=dict(color='#3498DB', width=3),
-            marker=dict(size=8),
-            hovertemplate='Age %{x}<br>' + metric + ' Mean: %{y:.2f}<extra></extra>',
+            marker=dict(size=6, symbol='circle'),
+            hovertemplate='Age %{x}<br>Mean: %{y:.2f}<extra></extra>'
         ))
         
-        # Add median line
+        # 3. Add Median (Optional, dashed)
         fig.add_trace(go.Scatter(
             x=age_stats['Age'],
             y=age_stats['Median'],
             mode='lines',
-            name='Median',
-            line=dict(color='#E67E22', width=2, dash='dash'),
-            hovertemplate='Age %{x}<br>' + metric + ' Median: %{y:.2f}<extra></extra>',
+            name='Cohort Median',
+            line=dict(color='#E67E22', width=1, dash='dot'),
+            hovertemplate='Age %{x}<br>Median: %{y:.2f}<extra></extra>'
         ))
         
-        # Add target player scatter
+        # 4. Add Target Player Glow
         if target_player:
             target = plot_df[plot_df['Player'] == target_player]
             if len(target) > 0:
+                # Add highlighting star
                 fig.add_trace(go.Scatter(
-                    x=target['Age'],
+                    x=target['Age_Group'],
                     y=target[metric],
                     mode='markers',
-                    marker=dict(size=12, color='gold', symbol='star'),
+                    marker=dict(
+                        size=15, 
+                        color='gold', 
+                        symbol='star',
+                        line=dict(width=2, color='white')
+                    ),
                     name=target_player,
-                    hovertemplate=f'<b>{target_player}</b><br>Age: %{{x}}<br>' + metric + ': %{y:.2f}<extra></extra>',
+                    hovertemplate=f"<b>{target_player}</b><br>Age: %{{x}}<br>{metric}: %{{y:.2f}}<extra></extra>"
                 ))
         
-        title_suffix = f' ({position})' if position else ''
+        # Labels and Theme
+        pos_label = f" ({position})" if position else ""
+        league_label = f" in {league}" if league and league != 'All' else ""
+        
         PlotlyVisualizations._apply_dark_theme(
             fig,
-            title=f'{RADAR_LABELS.get(metric, metric)} by Age{title_suffix}',
+            title=f"Age Curve: {RADAR_LABELS.get(metric, metric)}{pos_label}{league_label}",
             height=height
         )
+        
         fig.update_layout(
             xaxis_title='Age',
             yaxis_title=RADAR_LABELS.get(metric, metric),
             hovermode='x unified',
-            legend=dict(x=0.01, y=0.99, bgcolor='rgba(0,0,0,0)'),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
         )
         
         return fig
