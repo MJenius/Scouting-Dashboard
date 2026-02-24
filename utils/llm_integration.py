@@ -514,12 +514,12 @@ STATISTICAL PROFILE (Percentiles vs Peers):
 - Weaknesses: {', '.join(weaknesses)}
 
 INSTRUCTIONS:
-1. Start with an assessment of their overall profile and how they fit their '{archetype}' role.
-2. Analyze their key strengths, explaining the tactical impact of their high percentile ranks.
-3. Discuss areas for development or statistical anomalies (e.g., dominance vs raw volume).
-4. Conclude with a scout's recommendation on their ceiling and suitability for top-tier competition.
-5. Maintain a professional, objective scouting tone. Use technical football language.
-6. Target a length similar to a full rule-based report (approx 250 words).
+1. Provide a highly unique, engaging, and in-depth scouting perspective that goes beyond basic stats.
+2. Formulate a strong opinion on their playstyle and potential tactical roles, comparing them to well-known player archetypes if applicable.
+3. Highlight any hidden value or critical flaws derived from their statistical profile.
+4. Use professional, evocative football scouting terminology (e.g., 'half-spaces', 'progressive carries', 'rest defense').
+5. Do not just list the stats provided above; synthesize them into a coherent profile of what it's like to watch this player.
+6. Target a length of 3 engaging paragraphs (approx 200-250 words) that feel distinctly human and perceptive.
 
 REPORT:"""
         return prompt
@@ -527,7 +527,7 @@ REPORT:"""
     def generate_narrative(self, player_data: pd.Series) -> str:
         """Generate narrative with timeout and fallback."""
         if not self.available or not self.use_llm:
-            return self.fallback.generate_narrative(player_data)
+            return self.fallback.generate_scouts_take(player_data)['full_report']
         
         try:
             dict_data = player_data.to_dict()
@@ -551,10 +551,10 @@ REPORT:"""
             
         except requests.exceptions.Timeout:
             logger.warning("Narrative generation timeout, using fallback")
-            return self.fallback.generate_narrative(player_data)
+            return self.fallback.generate_scouts_take(player_data)['full_report']
         except Exception as e:
             logger.warning(f"LLM Narrative failed ({e}), using fallback")
-            return self.fallback.generate_narrative(player_data)
+            return self.fallback.generate_scouts_take(player_data)['full_report']
 
 
 # ============================================================================
@@ -564,7 +564,7 @@ REPORT:"""
 def generate_llm_narrative(player_data: pd.Series, use_llm: bool = True) -> str:
     """Wrapper for external calls."""
     if not use_llm:
-        return ScoutNarrativeGenerator().generate_narrative(player_data)
+        return ScoutNarrativeGenerator().generate_scouts_take(player_data)['full_report']
     
     generator = LLMScoutNarrativeGenerator()
     return generator.generate_narrative(player_data)

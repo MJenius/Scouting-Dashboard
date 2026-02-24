@@ -44,7 +44,7 @@ class AgeCurveAnalyzer:
     """
     
     HIGH_CEILING_THRESHOLD = 2.0  # Z-score threshold for "Ahead of Curve"
-    MIN_SAMPLE_SIZE = 5  # Minimum players per age group for reliable stats
+    MIN_SAMPLE_SIZE = 1  # Minimum players required to analyze an age cohort reliable stats
     
     def __init__(self, df: pd.DataFrame):
         """

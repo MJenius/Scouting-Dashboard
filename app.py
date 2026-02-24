@@ -847,7 +847,7 @@ def dispatch_agentic_action(api_params: Dict[str, Any]) -> str:
         else:
             # Standard Player Search
             if 'player_name' in api_params:
-                st.session_state.player_search_query = api_params['player_name']
+                st.session_state.player_search = api_params['player_name']
                 response_parts.append(f"Searching: {api_params['player_name']}")
         needs_rerun = True
     
@@ -1246,6 +1246,7 @@ if st.session_state.page == 'Player Search':
                     )
                 
                 with st.expander("View Automated Scouting Report", expanded=True):
+                    narrative = "No automated narrative available."
                     try:
                         if use_llm:
                             # Try LLM-powered generation
@@ -1392,22 +1393,28 @@ if st.session_state.page == 'Player Search':
                         st.write("**Select metric to analyze:**")
                     
                     with col2:
-                        # Position-specific metric options
-                        if is_goalkeeper:
-                            available_metrics = ['Save%', 'GA90', 'CS%', 'Saves']
-                            default_metric = 'Save%'
-                        elif player_data['Primary_Pos'] == 'FW':
-                            available_metrics = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Fld/90']
-                            default_metric = 'Gls/90'
-                        elif player_data['Primary_Pos'] == 'MF':
-                            available_metrics = ['Ast/90', 'Gls/90', 'Crs/90', 'TklW/90', 'Int/90']
-                            default_metric = 'Ast/90'
-                        else:  # DF
-                            available_metrics = ['Int/90', 'TklW/90', 'Crs/90', 'Ast/90']
-                            default_metric = 'Int/90'
+                        # Dynamically find the player's BEST metric based on percentiles
+                        available_metrics = []
+                        if getattr(player_data, 'Primary_Pos', 'MF') == 'GK':
+                            candidate_metrics = ['Save%', 'GA90', 'CS%', 'Saves']
+                        else:
+                            # Consider all key metrics to find their unique edge
+                            candidate_metrics = ['Gls/90', 'Ast/90', 'Sh/90', 'SoT/90', 'Crs/90', 'TklW/90', 'Int/90', 'xA90', 'xG90']
+                            
+                        # Filter to metrics present in dataset
+                        candidate_metrics = [m for m in candidate_metrics if m in df.columns and f'{m}_pct' in player_data.index]
                         
-                        # Filter to only metrics that exist in the data
-                        available_metrics = [m for m in available_metrics if m in df.columns]
+                        best_metric = candidate_metrics[0] if candidate_metrics else 'Ast/90'
+                        best_pct = -1
+                        
+                        for m in candidate_metrics:
+                            pct_val = player_data.get(f'{m}_pct', 0)
+                            if pd.notna(pct_val) and pct_val > best_pct:
+                                best_pct = pct_val
+                                best_metric = m
+                                
+                        available_metrics = candidate_metrics if candidate_metrics else [best_metric]
+                        default_metric = best_metric
                         
                         if len(available_metrics) > 0:
                             key_metric = st.selectbox(
@@ -1714,64 +1721,8 @@ if st.session_state.page == 'Player Search':
                             except Exception as e:
                                 st.warning(f"Could not calculate similarity breakdown: {e}")
                     
-                    # PDF Download Button
-                    st.divider()
-                    st.subheader("Export Scouting Dossier")
-                    
-                    col1, col2 = st.columns([2, 1])
-                    with col1:
-                        st.write("Download a comprehensive one-page scouting report with radar chart and AI analysis")
-                    
-                    with col2:
-                        if st.button("Download PDF Dossier", key='download_pdf_player_search'):
-                            try:
-                                from utils.pdf_export import generate_dossier
-                                from utils.llm_integration import generate_llm_narrative
-                                import tempfile
-                                import os
-                                
-                                # Generate narrative using LLM
-                                narrative = generate_llm_narrative(player_data)
-                                
-                                # Create temp PDF file using a more robust method to avoid WinError 32
-                                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                                    pdf_path = tmp.name
-                                
-                                try:
-                                    # Generate PDF
-                                    generate_dossier(player_data, narrative, pdf_path)
-                                    
-                                    # Read into bytes
-                                    with open(pdf_path, "rb") as f:
-                                        pdf_bytes = f.read()
-                                    
-                                    # Store in session state for download button
-                                    st.session_state['pdf_bytes'] = pdf_bytes
-                                    st.session_state['pdf_filename'] = f"{player_data.get('Player','player').replace(' ', '_')}_scouting_report.pdf"
-                                    
-                                    st.success("Dossier generated successfully! Click below to download.")
-                                    
-                                except Exception as e:
-                                    st.error(f"Error generating PDF: {e}")
-                                finally:
-                                    # Clean up temp file
-                                    if os.path.exists(pdf_path):
-                                        os.unlink(pdf_path)
-                                        
-                            except Exception as e:
-                                st.error(f"Error preparing PDF: {e}")
-                        
-                        # Show download button if ready (Persistent)
-                        if 'pdf_bytes' in st.session_state:
-                            st.download_button(
-                                label="Download PDF Dossier",
-                                data=st.session_state['pdf_bytes'],
-                                file_name=st.session_state['pdf_filename'],
-                                mime="application/pdf",
-                                use_container_width=True
-                            )
-        else:
-            st.info("No players found. Try a different search term.")
+            else:
+                st.info("No players found. Try a different search term.")
     else:
         # Check if filters are active (subset of data)
         # Note: We check if len(df_filtered) < len(df) OR if metrics are in filters

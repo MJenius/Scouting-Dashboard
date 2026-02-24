@@ -913,7 +913,7 @@ def create_similarity_driver_chart(feature_attribution: Dict[str, float]) -> go.
     PlotlyVisualizations._apply_dark_theme(
         fig,
         title='Similarity Driver Analysis (How Similar are They?)',
-        height=height
+        height=400
     )
     fig.update_layout(
         xaxis_title='Similarity Score',
